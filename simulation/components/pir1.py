@@ -2,16 +2,19 @@ import threading
 import time
 from simulators.pir1 import run_pir_simulator
 from sensors.pir1 import run_pir_loop
+from state.global_state import global_state
 
 def pir_callback(motion_detected):
     t = time.localtime()
     print("="*20)
     print(f"Timestamp: {time.strftime('%H:%M:%S', t)}")
-    print(f"Sensor: DPIR1")
+    print("Sensor: DPIR1")
     if motion_detected:
         print("Status: MOTION DETECTED")
+        global_state["motion"] = True
     else:
         print("Status: No motion")
+        global_state["motion"] = False
 
 def run_pir(settings, threads, stop_event):
     if settings['simulated']:
