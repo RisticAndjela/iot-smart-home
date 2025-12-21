@@ -30,6 +30,7 @@ GPIO.setmode(GPIO.BCM)
 from components.ds1 import run_ds
 from components.uds1 import run_uds
 from components.pir1 import run_pir
+from components.dms1 import run_dms
 from actuators.dl1 import DoorLight
 from actuators.db1 import DoorBuzzer
 from actuators.controller import run_controller
@@ -55,6 +56,8 @@ if __name__ == "__main__":
                 run_uds(pi1_settings['DUS1'], threads, stop_event)
             if 'DPIR1' in pi1_settings:
                 run_pir(pi1_settings['DPIR1'], threads, stop_event)
+            if 'DMS1' in pi1_settings:                               
+                run_dms(pi1_settings['DMS1'], threads, stop_event)
             if 'DL' in pi1_settings:
                 dl = DoorLight(pin=pi1_settings.get('DL', {}).get('pin', 17))
             if 'DB' in pi1_settings:

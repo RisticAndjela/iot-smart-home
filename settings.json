@@ -3,6 +3,7 @@
         "DS1": { "simulated": true, "pin": 11 },
         "DUS1": { "simulated": true, "pin_trig": 13, "pin_echo": 14 },
         "DPIR1": { "simulated": true, "pin": 16 },
+        "DMS1": { "simulated": true, "pin": 22 },
         "DL": { "pin": 17 },
         "DB": { "pin": 27 }
     }
