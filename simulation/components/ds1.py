@@ -2,16 +2,19 @@ import threading
 import time
 from simulators.ds1 import run_ds_simulator
 from sensors.ds1 import run_ds_loop
+from state.global_state import global_state
 
-def ds_callback(state):
+def ds_callback(val):
     t = time.localtime()
     print("="*20)
     print(f"Timestamp: {time.strftime('%H:%M:%S', t)}")
-    print(f"Sensor: Door Sensor (DS1)")
-    if state == 0:
-        print("Status: Door CLOSED") # Ili OPEN zavisno od tipa dugmeta
+    print("Sensor: Door Sensor (DS1)")
+    if val == 0:
+        print("Status: Door CLOSED")
+        global_state["door_open"] = False
     else:
         print("Status: Door OPEN")
+        global_state["door_open"] = True
 
 def run_ds(settings, threads, stop_event):
     if settings['simulated']:
