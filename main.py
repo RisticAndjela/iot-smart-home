@@ -52,8 +52,10 @@ if __name__ == "__main__":
             # Pokretanje DS1 (Vrata)
             if 'DS1' in pi1_settings:
                 run_ds(pi1_settings['DS1'], threads, stop_event)
+            # Pokretanje DUS1 (Ultrazvuk)
             if 'DUS1' in pi1_settings:
                 run_uds(pi1_settings['DUS1'], threads, stop_event)
+            # Pokretanje DPIR1 (Pokret)
             if 'DPIR1' in pi1_settings:
                 run_pir(pi1_settings['DPIR1'], threads, stop_event)
             if 'DMS1' in pi1_settings:                               
