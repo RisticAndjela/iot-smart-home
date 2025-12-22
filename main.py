@@ -27,15 +27,15 @@ except ImportError:
 
 GPIO.setmode(GPIO.BCM)
 
-from components.ds1 import run_ds
-from components.uds1 import run_uds
-from components.pir1 import run_pir
-from components.dms1 import run_dms
-from actuators.dl1 import DoorLight
-from actuators.db1 import DoorBuzzer
-from actuators.controller import run_controller
-from console.console import console_loop
-from console.command_bus import command_loop
+from simulation.components.ds1 import run_ds
+from simulation.components.uds1 import run_uds
+from simulation.components.pir1 import run_pir
+from simulation.components.dms1 import run_dms
+from simulation.actuators.dl1 import DoorLight
+from simulation.actuators.db1 import DoorBuzzer
+from simulation.actuators.controller import run_controller
+from simulation.console.console import console_loop
+from simulation.console.command_bus import command_loop
 
 if __name__ == "__main__":
     print("Starting app")
