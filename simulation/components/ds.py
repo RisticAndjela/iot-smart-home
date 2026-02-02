@@ -1,7 +1,7 @@
 import threading
 import time
-from simulation.simulators.ds1 import run_ds_simulator
-from simulation.sensors.ds1 import run_ds_loop
+from simulators.ds import run_ds_simulator
+from sensors.ds import run_ds_loop
 from messaging.event_queue import event_queue
 from simulation.sensors.sensor_event import SensorEvent
 

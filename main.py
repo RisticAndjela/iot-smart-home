@@ -19,10 +19,10 @@ except ImportError:
 GPIO.setmode(GPIO.BCM)
 
 # --- Import komponenti ---
-from simulation.components.ds1 import run_ds
-from simulation.components.uds1 import run_uds
-from simulation.components.pir1 import run_pir
-from simulation.components.dms1 import run_dms
+from components.ds import run_ds
+from components.uds import run_uds
+from components.pir import run_pir
+from components.dms import run_dms
 from simulation.actuators.dl1 import DoorLight
 from simulation.actuators.db1 import DoorBuzzer
 from simulation.actuators.controller import run_controller
