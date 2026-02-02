@@ -1,9 +1,9 @@
 import threading
 import time
 import queue
-from actuators.db1 import DoorBuzzer
-from actuators.dl1 import DoorLight
-from state.global_state import global_state
+from simulation.actuators.db1 import DoorBuzzer
+from simulation.actuators.dl1 import DoorLight
+from simulation.state.global_state import global_state
 
 """
     Controller thread that monitors global state and command queue to control actuators

@@ -1,29 +1,36 @@
 import threading
 import time
-from simulators.pir1 import run_pir_simulator
-from sensors.pir1 import run_pir_loop
-from state.global_state import global_state
+from simulation.simulators.pir1 import run_pir_simulator
+from simulation.sensors.pir1 import run_pir_loop
+from messaging.event_queue import event_queue
+from simulation.sensors.sensor_event import SensorEvent
 
-def pir_callback(motion_detected):
-    t = time.localtime()
-    print("="*20)
-    print(f"Timestamp: {time.strftime('%H:%M:%S', t)}")
-    print("Sensor: DPIR1")
-    if motion_detected:
-        print("Status: MOTION DETECTED")
-        global_state["motion"] = True
-    else:
-        print("Status: No motion")
-        global_state["motion"] = False
+def make_pir_callback(settings):
+    def pir_callback(motion_detected):
+        # deleted global_state 
+        print(f"[SIM] {settings['device']} motion detected: {motion_detected}")
+        event = SensorEvent(pi_id=settings["pi"],device=settings["device"],sensor_type=settings["type"],value=int(motion_detected),simulated=settings["simulated"],timestamp=time.time())
+        event_queue.put(event)
+    return pir_callback
+
 
 def run_pir(settings, threads, stop_event):
-    if settings['simulated']:
-        print("Starting DPIR1 simulator")
-        pir_thread = threading.Thread(target=run_pir_simulator, args=(3, pir_callback, stop_event))
-        pir_thread.start()
-        threads.append(pir_thread)
+    callback = make_pir_callback(settings)
+
+    if settings["simulated"]:
+        print(f"Starting {settings['device']} simulator on {settings['pi']}")
+        pir_thread = threading.Thread(
+            target=run_pir_simulator,
+            args=(3, callback, stop_event),
+            daemon=True
+        )
     else:
-        print("Starting DPIR1 real loop")
-        pir_thread = threading.Thread(target=run_pir_loop, args=(1, pir_callback, stop_event, settings))
-        pir_thread.start()
-        threads.append(pir_thread)
+        print(f"Starting {settings['device']} real loop on {settings['pi']}")
+        pir_thread = threading.Thread(
+            target=run_pir_loop,
+            args=(1, callback, stop_event, settings),
+            daemon=True
+        )
+
+    pir_thread.start()
+    threads.append(pir_thread)

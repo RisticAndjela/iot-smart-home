@@ -1,23 +1,35 @@
 import threading
 import time
-from simulators.uds1 import run_uds_simulator
-from sensors.uds1 import run_uds_loop
+from simulation.simulators.uds1 import run_uds_simulator
+from simulation.sensors.uds1 import run_uds_loop
+from messaging.event_queue import event_queue
+from simulation.sensors.sensor_event import SensorEvent
 
-def uds_callback(distance):
-    t = time.localtime()
-    print("="*20)
-    print(f"Timestamp: {time.strftime('%H:%M:%S', t)}")
-    print(f"Sensor: DUS1")
-    print(f"Distance: {distance} cm")
+
+def make_uds_callback(settings):
+    def uds_callback(distance):
+        print(f"[SIM] {settings['device']} distance: {distance}")
+        event = SensorEvent( pi_id=settings["pi"], device=settings["device"], sensor_type=settings["type"], value=distance, simulated=settings["simulated"], timestamp=time.time())
+        event_queue.put(event)
+    return uds_callback
 
 def run_uds(settings, threads, stop_event):
-    if settings['simulated']:
-        print("Starting DUS1 simulator")
-        uds_thread = threading.Thread(target=run_uds_simulator, args=(2, uds_callback, stop_event))
-        uds_thread.start()
-        threads.append(uds_thread)
+    callback = make_uds_callback(settings)
+
+    if settings["simulated"]:
+        print(f"Starting {settings['device']} simulator on {settings['pi']}")
+        uds_thread = threading.Thread(
+            target=run_uds_simulator,
+            args=(2, callback, stop_event),
+            daemon=True
+        )
     else:
-        print("Starting DUS1 real loop")
-        uds_thread = threading.Thread(target=run_uds_loop, args=(2, uds_callback, stop_event, settings))
-        uds_thread.start()
-        threads.append(uds_thread)
+        print(f"Starting {settings['device']} real loop on {settings['pi']}")
+        uds_thread = threading.Thread(
+            target=run_uds_loop,
+            args=(2, callback, stop_event, settings),
+            daemon=True
+        )
+
+    uds_thread.start()
+    threads.append(uds_thread)

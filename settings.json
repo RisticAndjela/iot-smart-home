@@ -1,10 +1,27 @@
 {
-    "PI1": {
-        "DS1": { "simulated": true, "pin": 11 },
-        "DUS1": { "simulated": true, "pin_trig": 13, "pin_echo": 14 },
-        "DPIR1": { "simulated": true, "pin": 16 },
-        "DMS1": { "simulated": true, "pin": 22 },
-        "DL": { "pin": 17 },
-        "DB": { "pin": 27 }
+  "PI1": {
+    "sensors": {
+      "DS1": { "device": "DS1", "pi":"1", "type": "door", "simulated": true, "mqtt_topic": "sensors/pi1/ds", "pin": 11 },
+      "DUS1": { "device": "DUS1", "pi":"1", "type": "ultrasonic", "simulated": true, "mqtt_topic": "sensors/pi1/dus", "pin_trig": 13, "pin_echo": 14},
+      "DPIR1": { "device": "DPIR1", "pi":"1", "type": "motion", "simulated": true, "mqtt_topic": "sensors/pi1/dpir", "pin": 16},
+      "DMS1": { "device": "DMS1", "pi":"1", "type": "membrane", "simulated": true,"mqtt_topic": "sensors/pi1/dms", "pin": 12}
+    },
+    "actuators": {
+      "DL": { "pin": 17 },
+      "DB": { "pin": 27 }
     }
+  },
+
+  "PI2": {
+    "sensors": {
+      "DS2": { "device": "DS2", "pi":"2", "type": "door", "simulated": true, "mqtt_topic": "sensors/pi2/ds", "pin": 21 },
+      "DUS2": { "device": "DUS2", "pi":"2", "type": "ultrasonic", "simulated": true, "mqtt_topic": "sensors/pi2/dus","pin_trig": 23,"pin_echo": 24 },
+      "DPIR2": {"device": "DPIR2", "pi":"2", "type": "motion", "simulated": true, "mqtt_topic": "sensors/pi2/dpir","pin": 26 },
+      "DMS2": { "device": "DMS2", "pi":"2", "type": "membrane", "simulated": true, "mqtt_topic": "sensors/pi2/dms", "pin": 22}
+    },
+    "actuators": {
+      "DL": { "pin": 5 },
+      "DB": { "pin": 6 } 
+    }
+  }
 }
