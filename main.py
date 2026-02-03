@@ -23,7 +23,7 @@ GPIO.setmode(GPIO.BCM)
 from influxdb_client import InfluxDBClient, WriteOptions
 from database.sensor_service import write_event_to_influx
 
-INFLUX_URL = "http://influxdb:8086"  
+INFLUX_URL = "http://localhost:8086"  
 INFLUX_TOKEN = "f8CPYZfj0gcuuUouK-DzX5Egu1CxM4-XQBpGcEbHijvxqGMvSipf2GGAXDBHg_jSAQ7TI1HVWw-TH1BTl4-RBQ=="
 INFLUX_ORG = "FTN"
 INFLUX_BUCKET = "iot-sensor-report"
@@ -101,6 +101,7 @@ if __name__ == "__main__":
         },
         daemon=True
     )
+
     publisher_thread.start()
 
     controller_thread = None

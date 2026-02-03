@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   influxdb:
     image: influxdb:2.7
@@ -21,6 +19,11 @@ services:
     container_name: mosquitto
     ports:
       - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
 
   grafana:
     image: grafana/grafana-oss
