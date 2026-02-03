@@ -1,4 +1,4 @@
-from actuators.controller import get_cmd_queue
+from simulation.actuators.controller import get_cmd_queue
 def command_loop(stop_event):
     """Class for command bus to send commands to controller thread from console input thread"""
     cmd_queue = get_cmd_queue()

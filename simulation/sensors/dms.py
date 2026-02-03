@@ -1,4 +1,10 @@
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except ModuleNotFoundError:
+    import fake_rpi
+    GPIO = fake_rpi.RPi.GPIO
+
+GPIO.setmode(GPIO.BCM)
 import time
 
 def run_dms_loop(delay, callback, stop_event, settings):
