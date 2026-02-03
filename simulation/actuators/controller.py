@@ -60,14 +60,11 @@ def run_controller(light:DoorLight, buzzer:DoorBuzzer, stop_event):
                     light_override_end = current_time + 5
                 
                 elif cmd == "b" and buzzer: # Buzzer trigger
-                    # 1. Upali buzzer i javi bazi (ON)
                     buzzer.on()
                     send_actuator_event("DB", 1, "buzzer")
                     
-                    # 2. POPRAVKA: Sacekaj malo i javi bazi da je gotovo (OFF)
                     time.sleep(3) 
                     send_actuator_event("DB", 0, "buzzer")
-                    # -----------------------------------------------------
                 
                 elif cmd == "q": 
                     stop_event.set()
@@ -96,7 +93,7 @@ def run_controller(light:DoorLight, buzzer:DoorBuzzer, stop_event):
                         buzzer_triggered = True
                 else:
                     if buzzer_triggered:
-                        # Kada se vrata zatvore, saljemo OFF
+                        # when the door close, sending OFF
                         send_actuator_event("DB", 0, "buzzer")
                         buzzer_triggered = False
 

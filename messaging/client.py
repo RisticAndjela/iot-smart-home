@@ -12,7 +12,7 @@ def create_mqtt_client(client_id="PI1"):
 
     client.on_connect = on_connect
 
-    client.connect("host.docker.internal", 1883)
+    client.connect("localhost", 1883)
     client.loop_start()  # start the network loop in background
 
     return client

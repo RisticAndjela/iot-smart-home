@@ -26,7 +26,7 @@ def make_dms_callback(settings, write_callback=None):
         # 2. Ako je vrednost bila 1, automatski pošalji 0 nakon 0.5s
         if val == 1:
             def reset_after_delay():
-                time.sleep(0.5) # Kratka pauza simulira otpuštanje tastera
+                time.sleep(1) # Kratka pauza simulira otpuštanje tastera
                 reset_event = SensorEvent(
                     pi_id=settings["pi"],
                     device=settings["device"],
