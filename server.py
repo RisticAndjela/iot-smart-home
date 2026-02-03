@@ -5,11 +5,10 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 
 # --- PODEŠAVANJA ---
 influx_url = "http://localhost:8086"
-influx_token = "Z9PmVjAyWUdWxHiuBR4ZX4O6Y3M202ASFkHXFttD195y0ouODK6X-1LM2APVKutmH5QM-eUWND25Zcm0pbxyEg==" 
-# influx_token = "f8CPYZfj0gcuuUouK-DzX5Egu1CxM4-XQBpGcEbHijvxqGMvSipf2GGAXDBHg_jSAQ7TI1HVWw-TH1BTl4-RBQ==" ANDJELIN TOKEN
-influx_org = "FTN"
-influx_bucket = "iot_bucket"
-# influx_bucket = "iot-sensor-report" ANDJELIN BUCKET
+influx_token = "iot-super-token"     
+influx_org = "FTN"                   
+influx_bucket = "iot-sensor-report"  
+
 mqtt_broker = "localhost"
 mqtt_topic = "sensors/#"
 
