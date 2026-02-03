@@ -56,7 +56,7 @@ def run_4sd(settings, threads, stop_event):
                 print(f"[ACTUATOR] {device_name} FINISHED!")
 
             else:
-                # REALNI HARDVER (Ovo ce raditi samo na Raspberry Pi)
+                # REALNI HARDVER (samo na Raspberry Pi)
                 if display:
                     now = datetime.now()
                     try:

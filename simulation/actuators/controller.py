@@ -65,7 +65,7 @@ def run_controller(light:DoorLight, buzzer:DoorBuzzer, stop_event):
                     send_actuator_event("DB", 1, "buzzer")
                     
                     # 2. POPRAVKA: Sacekaj malo i javi bazi da je gotovo (OFF)
-                    time.sleep(1) # Sacekaj 1 sekundu (koliko traje zvuk)
+                    time.sleep(3) 
                     send_actuator_event("DB", 0, "buzzer")
                     # -----------------------------------------------------
                 

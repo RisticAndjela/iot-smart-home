@@ -9,12 +9,39 @@ from simulation.state.global_state import global_state
 
 def make_dms_callback(settings, write_callback=None):
     def dms_callback(val):
-        global_state["dms_pressed"] = bool(val) # important for acctuators
+        # 1. Šaljemo originalnu vrednost (npr. 1)
+        global_state["dms_pressed"] = bool(val)
         print(f"[SIM] {settings['device']} value: {val}")
-        event = SensorEvent(pi_id=settings["pi"],device=settings["device"],sensor_type=settings["type"],  value=val,simulated=settings["simulated"],timestamp=time.time())
+        
+        event = SensorEvent(
+            pi_id=settings["pi"],
+            device=settings["device"],
+            sensor_type=settings["type"],
+            value=val,
+            simulated=settings["simulated"],
+            timestamp=time.time()
+        )
         event_queue.put(event)
-        if write_callback:
-                write_callback(event) 
+
+        # 2. Ako je vrednost bila 1, automatski pošalji 0 nakon 0.5s
+        if val == 1:
+            def reset_after_delay():
+                time.sleep(0.5) # Kratka pauza simulira otpuštanje tastera
+                reset_event = SensorEvent(
+                    pi_id=settings["pi"],
+                    device=settings["device"],
+                    sensor_type=settings["type"],
+                    value=0, # Resetujemo na nulu
+                    simulated=settings["simulated"],
+                    timestamp=time.time()
+                )
+                event_queue.put(reset_event)
+                global_state["dms_pressed"] = False
+                # print(f"[SIM] {settings['device']} auto-reset to 0")
+
+            # Pokrećemo reset u posebnoj niti da ne kočimo simulator
+            threading.Thread(target=reset_after_delay, daemon=True).start()
+
     return dms_callback
 
 

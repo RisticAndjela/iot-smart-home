@@ -7,7 +7,7 @@ from messaging.client import create_mqtt_client
 from database.sensor_service import write_event_to_influx
 from settings import load_settings
 
-# --- SIMULACIJA (FIX ZA WINDOWS) ---
+# --- SIMULACIJA ---
 try:
     import RPi.GPIO as GPIO
 except ImportError:
@@ -48,6 +48,7 @@ from simulation.components.uds import run_uds
 from simulation.components.pir import run_pir
 from simulation.components.dms import run_dms
 from simulation.components.dht import run_dht
+from simulation.components.btn import run_btn
 from simulation.components.gyro import run_gyro
 
 from simulation.actuators.display import run_4sd
@@ -116,6 +117,42 @@ if __name__ == "__main__":
             actuators = pi_settings.get("actuators", {})
 
             # --- SENZORI ---
+
+            # Door Sensor (DS1 i DS2)
+            if 'DS1' in sensors and pi_id == "PI1":
+                run_ds(sensors['DS1'], threads, stop_event)
+            if 'DS2' in sensors and pi_id == "PI2":
+                run_ds(sensors['DS2'], threads, stop_event)
+
+            # Ultrasonic (DUS1 i DUS2)
+            if 'DUS1' in sensors and pi_id == "PI1":
+                run_uds(sensors['DUS1'], threads, stop_event)
+            if 'DUS2' in sensors and pi_id == "PI2":
+                run_uds(sensors['DUS2'], threads, stop_event)
+
+            # Motion PIR (DPIR1 i DPIR2)
+            if 'DPIR1' in sensors and pi_id == "PI1":
+                run_pir(sensors['DPIR1'], threads, stop_event)
+            if 'DPIR2' in sensors and pi_id == "PI2":
+                run_pir(sensors['DPIR2'], threads, stop_event)
+
+            # Membrane Switch (DMS1)
+            if 'DMS1' in sensors and pi_id == "PI1":
+                run_dms(sensors['DMS1'], threads, stop_event)
+            
+            # --- SENZORI ZA PI 2 ---
+            
+            # Kitchen Button (BTN) - Koristimo run_ds jer je isto (taster)
+            if 'BTN' in sensors and pi_id == "PI2":
+                run_ds(sensors['BTN'], threads, stop_event)
+
+            # Kitchen DHT (DHT3)
+            if 'DHT3' in sensors and pi_id == "PI2":
+                run_dht(sensors['DHT3'], threads, stop_event)
+
+            # Gyroscope (GSG)
+            if 'GSG' in sensors and pi_id == "PI2":
+                run_gyro(sensors['GSG'], threads, stop_event)
             if pi_id == "PI1":
                 if 'DS1' in sensors: run_ds(sensors['DS1'], threads, stop_event, write_callback=lambda event: write_event_to_influx(write_api, INFLUX_BUCKET, event))
                 if 'DUS1' in sensors: run_uds(sensors['DUS1'], threads, stop_event, write_callback=lambda event: write_event_to_influx(write_api, INFLUX_BUCKET, event))
@@ -129,6 +166,10 @@ if __name__ == "__main__":
                 if 'BTN' in sensors: run_ds(sensors['BTN'], threads, stop_event, write_callback=lambda event: write_event_to_influx(write_api, INFLUX_BUCKET, event))
                 if 'DHT3' in sensors: run_dht(sensors['DHT3'], threads, stop_event)
                 if 'GSG' in sensors: run_gyro(sensors['GSG'], threads, stop_event)
+
+            # Kitchen Button (BTN)
+            if 'BTN' in sensors and pi_id == "PI2":
+                run_btn(sensors['BTN'], threads, stop_event)
 
             # --- AKTUATORI ---
             if 'DL' in actuators:
