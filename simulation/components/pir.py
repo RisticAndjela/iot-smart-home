@@ -1,7 +1,7 @@
 import threading
 import time
-from simulators.pir import run_pir_simulator
-from sensors.pir import run_pir_loop
+from simulation.simulators.pir import run_pir_simulator
+from simulation.sensors.pir import run_pir_loop
 from messaging.event_queue import event_queue
 from simulation.sensors.sensor_event import SensorEvent
 

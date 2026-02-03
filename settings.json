@@ -7,8 +7,22 @@
       "DMS1": { "device": "DMS1", "pi":"1", "type": "membrane", "simulated": true,"mqtt_topic": "sensors/pi1/dms", "pin": 12}
     },
     "actuators": {
-      "DL": { "pin": 17 },
-      "DB": { "pin": 27 }
+      "DL": { 
+        "device": "DL", 
+        "pi": "1", 
+        "type": "light", 
+        "simulated": true, 
+        "mqtt_topic": "actuators/pi1/dl1", 
+        "pin": 17 
+      },
+      "DB": { 
+        "device": "DB", 
+        "pi": "1", 
+        "type": "buzzer", 
+        "simulated": true, 
+        "mqtt_topic": "actuators/pi1/d1", 
+        "pin": 27 
+      }
     }
   },
 
@@ -17,11 +31,20 @@
       "DS2": { "device": "DS2", "pi":"2", "type": "door", "simulated": true, "mqtt_topic": "sensors/pi2/ds", "pin": 21 },
       "DUS2": { "device": "DUS2", "pi":"2", "type": "ultrasonic", "simulated": true, "mqtt_topic": "sensors/pi2/dus","pin_trig": 23,"pin_echo": 24 },
       "DPIR2": {"device": "DPIR2", "pi":"2", "type": "motion", "simulated": true, "mqtt_topic": "sensors/pi2/dpir","pin": 26 },
-      "DMS2": { "device": "DMS2", "pi":"2", "type": "membrane", "simulated": true, "mqtt_topic": "sensors/pi2/dms", "pin": 22}
+
+      "BTN": { "device": "BTN", "pi": "2", "type": "button", "simulated": true, "mqtt_topic": "sensors/pi2/btn", "pin": 27 }, 
+      "DHT3": { "device": "DHT3", "pi": "2", "type": "dht", "simulated": true, "mqtt_topic": "sensors/pi2/dht3", "pin": 12 },
+      "GSG": {  "device": "GSG", "pi": "2", "type": "gyro", "simulated": true, "mqtt_topic": "sensors/pi2/gsg", "pin": 1 }
     },
     "actuators": {
-      "DL": { "pin": 5 },
-      "DB": { "pin": 6 } 
+      "4SD": { 
+        "device": "4SD", 
+        "pi": "2", 
+        "type": "display", 
+        "simulated": true, 
+        "mqtt_topic": "actuators/pi2/4sd", 
+        "pins": { "clk": 18, "dio": 19 } 
+      }
     }
   }
 }

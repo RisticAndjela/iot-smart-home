@@ -1,7 +1,7 @@
 import threading
 import time
-from simulators.uds import run_uds_simulator
-from sensors.uds import run_uds_loop
+from simulation.simulators.uds import run_uds_simulator
+from simulation.sensors.uds import run_uds_loop
 from messaging.event_queue import event_queue
 from simulation.sensors.sensor_event import SensorEvent
 

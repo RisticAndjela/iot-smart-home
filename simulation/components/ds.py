@@ -1,14 +1,14 @@
 import threading
 import time
-from simulators.ds import run_ds_simulator
-from sensors.ds import run_ds_loop
+from simulation.simulators.ds import run_ds_simulator
+from simulation.sensors.ds import run_ds_loop
 from messaging.event_queue import event_queue
 from simulation.sensors.sensor_event import SensorEvent
 
 def make_ds_callback(settings):
     def ds_callback(val):
         # deleted global_state
-        print(f"[SIM] {settings['device']} distance: {val}")
+        print(f"[SIM] {settings['device']} state: {val}")
         event = SensorEvent(pi_id=settings["pi"],device=settings["device"],sensor_type=settings["type"],value=int(val),simulated=settings["simulated"],timestamp=time.time())
         event_queue.put(event)
     return ds_callback
