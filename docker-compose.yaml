@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: IOT
+      DOCKER_INFLUXDB_INIT_PASSWORD: iotpassword
+      DOCKER_INFLUXDB_INIT_ORG: FTN
+      DOCKER_INFLUXDB_INIT_BUCKET: iot-sensor-report
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: iot-super-token
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+
+  grafana:
+    image: grafana/grafana-oss
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - influxdb
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  influxdb_data:
+  grafana_data:

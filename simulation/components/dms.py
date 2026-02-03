@@ -7,18 +7,19 @@ from simulation.sensors.sensor_event import SensorEvent
 from simulation.state.global_state import global_state
 
 
-def make_dms_callback(settings):
+def make_dms_callback(settings, write_callback=None):
     def dms_callback(val):
         global_state["dms_pressed"] = bool(val) # important for acctuators
         print(f"[SIM] {settings['device']} value: {val}")
         event = SensorEvent(pi_id=settings["pi"],device=settings["device"],sensor_type=settings["type"],  value=val,simulated=settings["simulated"],timestamp=time.time())
         event_queue.put(event)
-
+        if write_callback:
+                write_callback(event) 
     return dms_callback
 
 
-def run_dms(settings, threads, stop_event):
-    callback = make_dms_callback(settings)
+def run_dms(settings, threads, stop_event, write_callback=None):
+    callback = make_dms_callback(settings, write_callback)
 
     if settings.get("simulated", True):
         print(f"Starting {settings['device']} simulator on {settings['pi']}")

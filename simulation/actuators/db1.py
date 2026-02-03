@@ -1,6 +1,12 @@
 import threading
 import time
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except ModuleNotFoundError:
+    import fake_rpi
+    GPIO = fake_rpi.RPi.GPIO
+
+GPIO.setmode(GPIO.BCM)
 
 class DoorBuzzer:
     def __init__(self, pin, duration=1.0):

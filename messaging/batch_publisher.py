@@ -1,6 +1,7 @@
 import time
 import json
 import queue
+from database.sensor_service import write_event_to_influx
 from messaging.event_queue import event_queue
 
 def batch_publisher(mqtt_client, stop_event, batch_size=10, interval=5):
@@ -11,6 +12,7 @@ def batch_publisher(mqtt_client, stop_event, batch_size=10, interval=5):
         try:
             event = event_queue.get(timeout=interval)
             batch.append(event)
+            write_event_to_influx(event)
         except queue.Empty:
             pass
 

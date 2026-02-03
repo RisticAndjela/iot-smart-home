@@ -6,15 +6,17 @@ from messaging.event_queue import event_queue
 from simulation.sensors.sensor_event import SensorEvent
 
 
-def make_uds_callback(settings):
+def make_uds_callback(settings, write_callback=None):
     def uds_callback(distance):
         print(f"[SIM] {settings['device']} distance: {distance}")
         event = SensorEvent( pi_id=settings["pi"], device=settings["device"], sensor_type=settings["type"], value=distance, simulated=settings["simulated"], timestamp=time.time())
         event_queue.put(event)
+        if write_callback:
+            write_callback(event)
     return uds_callback
 
-def run_uds(settings, threads, stop_event):
-    callback = make_uds_callback(settings)
+def run_uds(settings, threads, stop_event, write_callback=None):
+    callback = make_uds_callback(settings, write_callback)
 
     if settings["simulated"]:
         print(f"Starting {settings['device']} simulator on {settings['pi']}")
