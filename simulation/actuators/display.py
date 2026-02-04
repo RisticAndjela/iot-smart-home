@@ -9,10 +9,10 @@ def run_4sd(settings, threads, stop_event):
     pi_id = settings['pi']
     simulated = settings['simulated']
     
-    # --- HARDVER DEO ---
+    # --- HARDWARE SECTION ---
     display = None
-    # Pokusavamo da uvezemo biblioteku SAMO ako nismo u simulaciji
-    # Ali stavljamo u try-except blok da Windows ne bi prijavio gresku pri pokretanju
+    # We attempt to import the library ONLY if we are not in simulation mode.
+    # We use a try-except block to prevent errors when running on non-Pi systems (e.g., Windows).
     try:
         if not simulated:
             import tm1637
@@ -21,9 +21,9 @@ def run_4sd(settings, threads, stop_event):
             display = tm1637.TM1637(clk=clk, dio=dio)
             display.brightness(1)
     except ImportError:
-        print(f"[{device_name}] UPOZORENJE: tm1637 biblioteka nije pronadjena. (Ocekivano na Windows-u)")
+        print(f"[{device_name}] WARNING: tm1637 library not found. (Expected on Windows)")
     except Exception as e:
-        print(f"[{device_name}] Greska pri inicijalizaciji: {e}")
+        print(f"[{device_name}] Error during initialization: {e}")
 
 
     def display_loop():
@@ -31,17 +31,16 @@ def run_4sd(settings, threads, stop_event):
         
         while not stop_event.is_set():
             if simulated:
-                # SIMULACIJA: Odbrojavanje (Kitchen Timer)
-                time.sleep(15) # Cekamo 15 sekundi pre aktivacije
+                time.sleep(15) 
                 
-                # Odbrojavanje: 5, 4, 3...
+                # Countdown: 5, 4, 3...
                 for i in range(5, -1, -1):
                     if stop_event.is_set(): break
                     
                     display_text = f"00:0{i}"
                     print(f"[ACTUATOR] {device_name} Display: {display_text}")
 
-                    # Slanje na MQTT
+                    # Sending to MQTT
                     event = SensorEvent(
                         pi_id=pi_id,
                         device=device_name,
@@ -56,11 +55,11 @@ def run_4sd(settings, threads, stop_event):
                 print(f"[ACTUATOR] {device_name} FINISHED!")
 
             else:
-                # REALNI HARDVER (Ovo ce raditi samo na Raspberry Pi)
+                # REAL HARDWARE (Raspberry Pi only)
                 if display:
                     now = datetime.now()
                     try:
-                        # Prikazujemo sate i minute
+                        # Display hours and minutes
                         display.show(now.hour * 100 + now.minute)
                     except:
                         pass

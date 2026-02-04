@@ -5,10 +5,9 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 
 # --- PODEŠAVANJA ---
 influx_url = "http://localhost:8086"
-# ZAMENI OVO SVOJIM TOKENOM OPET:
-influx_token = "Z9PmVjAyWUdWxHiuBR4ZX4O6Y3M202ASFkHXFttD195y0ouODK6X-1LM2APVKutmH5QM-eUWND25Zcm0pbxyEg==" 
-influx_org = "FTN"
-influx_bucket = "iot_bucket"
+influx_token = "iot-super-token"     
+influx_org = "FTN"                   
+influx_bucket = "iot-sensor-report"  
 
 mqtt_broker = "localhost"
 mqtt_topic = "sensors/#"
@@ -19,7 +18,6 @@ def write_to_influx(data):
     
     try:
         # Odredjujemo naziv merenja (Measurement)
-        # Ako je temperatura, neka se zove "Temperature", itd.
         measurement_name = data.get("sensor_type", "SensorData").capitalize()
         if data.get("device") == "4SD": 
             measurement_name = "Kitchen_Timer"
@@ -45,8 +43,7 @@ def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
         
-        # --- FIX: Izvlacimo ime uredjaja iz TEME (Topic-a) ---
-        # Tema izgleda npr: "sensors/pi1/ds1" ili "actuators/pi2/4sd"
+        # Tema: "sensors/pi1/ds1" ili "actuators/pi2/4sd"
         topic_parts = msg.topic.split('/')
         
         # 1. Pokusavamo da nadjemo ime uredjaja (zadnji deo teme)
@@ -57,8 +54,6 @@ def on_message(client, userdata, msg):
         if "pi" not in payload and len(topic_parts) >= 3:
             payload["pi"] = topic_parts[1] # npr. "pi1"
             
-        # -----------------------------------------------------
-
         write_to_influx(payload)
     except Exception as e:
         print(f"Greska pri obradi poruke: {e}")
