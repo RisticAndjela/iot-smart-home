@@ -5,6 +5,6 @@ class SensorEvent:
     pi_id: str            # eg. "PI1"
     device: str           # eg. "UDS1"
     sensor_type: str      # "ultrasonic", "pir", "door"
-    value: float | int
+    value: float
     simulated: bool
     timestamp: float
