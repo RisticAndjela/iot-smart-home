@@ -1,0 +1,159 @@
+:root {
+    /* Duboka tamno plava pozadina */
+    --bg-color: #05060a; 
+    --bg-gradient: radial-gradient(circle at center, #0a0e1a 0%, #05060a 100%);
+    --card-bg: rgba(13, 17, 28, 0.9); 
+    --text-color: #e2e8f0;
+    
+    /* Nova paleta boja */
+    --accent-blue: #00d2ff;   /* Neon cijan */
+    --accent-purple: #9d50bb; /* Jaka ljubičasta */
+    --accent-indigo: #6e7aff; /* Indigo plava */
+    
+    --shadow: 0 15px 35px rgba(0, 0, 0, 0.9);
+    --glass-border: 1px solid rgba(0, 210, 255, 0.1); /* Cijan ivice */
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    background: var(--bg-gradient);
+    background-attachment: fixed;
+    color: var(--text-color);
+    margin: 0;
+    padding: 40px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center; 
+    min-height: 100vh;
+}
+
+h1 {
+    color: var(--accent-blue);
+    text-transform: uppercase;
+    letter-spacing: 5px;
+    margin-bottom: 40px;
+    text-align: center;
+    border-bottom: 2px solid var(--accent-purple);
+    padding-bottom: 15px;
+    text-shadow: 0 0 10px rgba(0, 210, 255, 0.3);
+}
+
+.tabs {
+    display: inline-flex;
+    gap: 10px;
+    margin-bottom: 40px;
+    background: rgba(20, 25, 40, 0.8);
+    padding: 8px;
+    border-radius: 12px;
+    border: var(--glass-border);
+}
+
+.tab-btn {
+    background: transparent;
+    border: none;
+    color: #64748b;
+    padding: 12px 25px;
+    cursor: pointer;
+    font-weight: 600;
+    text-transform: uppercase;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.tab-btn:hover {
+    color: var(--accent-blue);
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, var(--accent-purple), var(--accent-indigo));
+    color: white;
+    box-shadow: 0 4px 15px rgba(157, 80, 187, 0.4);
+}
+
+.tab-content {
+    display: none;
+    width: 100%;
+    max-width: 1100px;
+}
+
+.tab-content.active {
+    display: block !important;
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.container {
+    display: flex;
+    gap: 30px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.card {
+    background-color: var(--card-bg);
+    border-radius: 20px;
+    padding: 30px;
+    width: 320px;
+    border: var(--glass-border);
+    box-shadow: var(--shadow);
+    transition: transform 0.3s ease, border-color 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    border-color: var(--accent-blue);
+}
+
+/* Različiti akcenti za PI uređaje */
+.pi1 { border-top: 5px solid var(--accent-blue); }
+.pi2 { border-top: 5px solid var(--accent-purple); }
+.pi3 { border-top: 5px solid var(--accent-indigo); }
+
+h2 {
+    font-size: 1.2rem;
+    color: #fff;
+    margin-bottom: 25px;
+    letter-spacing: 1px;
+}
+
+p {
+    display: flex;
+    justify-content: space-between;
+    margin: 18px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 8px;
+    font-size: 0.9rem;
+}
+
+b {
+    color: var(--accent-blue);
+    background: rgba(0, 210, 255, 0.05);
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 210, 255, 0.2);
+    font-family: 'Consolas', monospace;
+}
+
+#grafana-tab {
+    max-width: 95%; 
+}
+
+.grafana-section {
+    width: 100%;
+    background: #0d1117; /* Još tamnija boja za grafanu */
+    padding: 15px;
+    border-radius: 20px;
+    border: var(--glass-border);
+}
+
+iframe {
+    border-radius: 12px;
+}
