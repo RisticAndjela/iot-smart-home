@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+    <meta charset="UTF-8">
+    <title>IoT Smart Home | Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <h1>Smart Home Control Center</h1>
+
+    <div class="tabs">
+        <button id="defaultOpen" class="tab-btn" onclick="openTab(event, 'status-tab')">Real-time Status</button>
+        <button class="tab-btn" onclick="openTab(event, 'grafana-tab')">Analytics & History</button>
+    </div>
+
+    <div id="status-tab" class="tab-content">
+        <div class="container">
+            <div class="card pi1">
+                <h2>PI1 - Entrance</h2>
+                <p>Door Sensor (DS1): <b id="val-DS1">{{ data.get('DS1', 'N/A') }}</b></p>
+                <p>Door Light (DL): <b id="val-DL">{{ data.get('DL', 'OFF') }}</b></p>
+                <p>Ultrasonic (DUS1): <b id="val-DUS1">{{ data.get('DUS1', 'N/A') }}</b> cm</p>
+                <p>Door Buzzer (DB): <b id="val-DB">{{ data.get('DB', 'OFF') }}</b></p>
+                <p>Motion (DPIR1): <b id="val-DPIR1">{{ data.get('DPIR1', 'N/A') }}</b></p>
+                <p>Membrane Switch (DMS): <b id="val-DMS">{{ data.get('DMS', 'N/A') }}</b></p>
+                <p>Web Camera (WEBC): <b>Inactive</b></p>
+            </div>
+
+            <div class="card pi2">
+                <h2>PI2 - Kitchen & Garage</h2>
+                <p>Door Sensor (DS2): <b id="val-DS2">{{ data.get('DS2', 'N/A') }}</b></p>
+                <p>Ultrasonic (DUS2): <b id="val-DUS2">{{ data.get('DUS2', 'N/A') }}</b> cm</p>
+                <p>Motion (DPIR2): <b id="val-DPIR2">{{ data.get('DPIR2', 'N/A') }}</b></p>
+                <p>Kitchen Timer (4SD): <b id="val-4SD">{{ data.get('4SD', '00:00') }}</b></p>
+                <p>Kitchen Button (BTN): <b id="val-BTN">{{ data.get('BTN', 'N/A') }}</b></p>
+                <p>Kitchen Temp (DHT3): <b id="val-DHT3">{{ data.get('DHT3', 'N/A') }}</b>°C</p>
+                <p>Gyroscope (GSG): <b id="val-GSG">{{ data.get('GSG', 'N/A') }}</b></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="grafana-tab" class="tab-content">
+        <div class="grafana-section">
+            <iframe src="http://localhost:3000/goto/dfdjxstyvtddsf?orgId=1" width="100%" height="600" frameborder="0"></iframe>
+        </div>
+    </div>
+
+    <script>
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+                tabcontent[i].classList.remove("active");
+            }
+            tablinks = document.getElementsByClassName("tab-btn");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].classList.remove("active");
+            }
+            const targetTab = document.getElementById(tabName);
+            targetTab.style.display = "block";
+            setTimeout(() => { targetTab.classList.add("active"); }, 10);
+            evt.currentTarget.classList.add("active");
+        }
+
+        // --- FUNKCIJA ZA TIHO OSVEŽAVANJE PODATAKA ---
+        function refreshData() {
+            fetch('/api/data')
+                .then(response => response.json())
+                .then(data => {
+                    for (let key in data) {
+                        let element = document.getElementById('val-' + key);
+                        if (element) {
+                            element.innerText = data[key];
+                        }
+                    }
+                })
+                .catch(err => console.log('Greška pri osvežavanju:', err));
+        }
+
+        window.onload = function() {
+            document.getElementById("defaultOpen").click();
+            // Pokrećemo osvežavanje na svakih 5 sekundi za fluidniji rad
+            setInterval(refreshData, 5000); 
+        };
+    </script>
+</body>
+</html>
