@@ -85,12 +85,21 @@ if __name__ == "__main__":
                 if 'BTN' in sensors: run_btn(sensors['BTN'], threads, stop_event)
                 if 'DHT3' in sensors: run_dht(sensors['DHT3'], threads, stop_event)
                 if 'GSG' in sensors: run_gyro(sensors['GSG'], threads, stop_event)
-
+            # --- SENZORI PI 3 ---
+            if pi_id == "PI3":
+                if "DHT1" in sensors: run_dht(sensors['DHT1'], threads, stop_event)
+                if "DHT2" in sensors: run_dht(sensors['DHT2'], threads, stop_event)
+                if "IR" in sensors: run_uds(sensors['IR'], threads, stop_event)
+                if "DPIR3" in sensors: run_pir(sensors['DPIR3'], threads, stop_event)
             # --- AKTUATORI ---
             if 'DL' in actuators:
                 dl = DoorLight(pin=actuators['DL']['pin'])
             if 'DB' in actuators:
                 db = DoorBuzzer(pin=actuators['DB']['pin'])
+            if pi_id == "PI3" and 'BRGB' in actuators:
+                print(f"Running BRGB for PI {pi_id}")
+            if pi_id == "PI3" and 'LCD' in actuators:
+                print(f"Running LCD for PI {pi_id}")
             if pi_id == "PI2" and '4SD' in actuators:
                 run_4sd(actuators['4SD'], threads, stop_event)
 
