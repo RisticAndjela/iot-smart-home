@@ -7,22 +7,8 @@
       "DMS1": { "device": "DMS1", "pi":"1", "type": "membrane", "simulated": true,"mqtt_topic": "sensors/pi1/dms", "pin": 12}
     },
     "actuators": {
-      "DL": { 
-        "device": "DL", 
-        "pi": "1", 
-        "type": "light", 
-        "simulated": true, 
-        "mqtt_topic": "actuators/pi1/dl1", 
-        "pin": 17 
-      },
-      "DB": { 
-        "device": "DB", 
-        "pi": "1", 
-        "type": "buzzer", 
-        "simulated": true, 
-        "mqtt_topic": "actuators/pi1/d1", 
-        "pin": 27 
-      }
+      "DL": { "device": "DL", "pi": "1", "type": "light", "simulated": true, "mqtt_topic": "actuators/pi1/dl1", "pin": 17 },
+      "DB": { "device": "DB", "pi": "1", "type": "buzzer", "simulated": true, "mqtt_topic": "actuators/pi1/db1", "pin": 27 }
     }
   },
 
@@ -37,14 +23,7 @@
       "GSG": {  "device": "GSG", "pi": "2", "type": "gyro", "simulated": true, "mqtt_topic": "sensors/pi2/gsg", "pin": 1 }
     },
     "actuators": {
-      "4SD": { 
-        "device": "4SD", 
-        "pi": "2", 
-        "type": "display", 
-        "simulated": true, 
-        "mqtt_topic": "actuators/pi2/4sd", 
-        "pins": { "clk": 18, "dio": 19 } 
-      }
+      "4SD": { "device": "4SD", "pi": "2", "type": "display", "simulated": true, "mqtt_topic": "actuators/pi2/4sd", "pins": { "clk": 18, "dio": 19 } }
     }
   }
 }
