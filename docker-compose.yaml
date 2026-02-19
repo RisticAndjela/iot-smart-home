@@ -1,4 +1,28 @@
 services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: frontend
+    depends_on:
+      - mosquitto
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./:/app  
   influxdb:
     image: influxdb:2.7
     container_name: influxdb
@@ -13,17 +37,6 @@ services:
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: iot-super-token
     volumes:
       - influxdb_data:/var/lib/influxdb2
-
-  mosquitto:
-    image: eclipse-mosquitto
-    container_name: mosquitto
-    ports:
-      - "1883:1883"
-    volumes:
-      - ./mosquitto/config:/mosquitto/config
-      - ./mosquitto/data:/mosquitto/data
-      - ./mosquitto/log:/mosquitto/log
-
 
   grafana:
     image: grafana/grafana-oss
