@@ -1,13 +1,26 @@
-#!/usr/bin/env python3
 import os
 import json
 import random
 import time
+import threading
+import signal
+import sys
+from types import SimpleNamespace
+
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_socketio import SocketIO
+import os, sys
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+    
+from messaging.client import create_mqtt_client
+from messaging import event_queue
+from messaging.batch_publisher import batch_publisher
 
 # --- Paths
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))      # frontend/
 SETTINGS_PATH = os.path.abspath(os.path.join(BASE_DIR, '..', 'settings.json'))
 FRONTEND_DIR = BASE_DIR                                      # index/templates are expected under frontend/
 TEMPLATES_INDEX = os.path.join(FRONTEND_DIR, 'templates', 'index.html')
@@ -106,6 +119,58 @@ def _random_value_for(sensor_type):
         return random.choice(['#ff0000','#00ff00','#0000ff','#ffffff'])
     return round(random.random()*100, 2)
 
+# --- MQTT setup: create client and background batch publisher thread
+mqtt_client = None
+_mqtt_stop_event = threading.Event()
+_mqtt_thread = None
+
+def start_mqtt_background(client_id="WEBAPP", batch_size=10, interval=5):
+    global mqtt_client, _mqtt_thread
+    try:
+        mqtt_client = create_mqtt_client(client_id=client_id)
+        _mqtt_stop_event.clear()
+        _mqtt_thread = threading.Thread(
+            target=batch_publisher,
+            args=(mqtt_client, _mqtt_stop_event, batch_size, interval, None),
+            daemon=True
+        )
+        _mqtt_thread.start()
+        print("Started MQTT client and batch_publisher thread")
+    except Exception as e:
+        print("Failed to start MQTT background:", e)
+
+def stop_mqtt_background():
+    global mqtt_client
+    try:
+        _mqtt_stop_event.set()
+        if mqtt_client:
+            try:
+                mqtt_client.loop_stop()
+            except Exception:
+                pass
+            try:
+                mqtt_client.disconnect()
+            except Exception:
+                pass
+        print("Stopped MQTT background")
+    except Exception as e:
+        print("Error while stopping MQTT:", e)
+
+# graceful shutdown handlers
+def _shutdown_handler(signum, frame):
+    print("Received shutdown signal:", signum)
+    stop_mqtt_background()
+    # give some time to stop
+    time.sleep(0.5)
+    # let socketio/Flask handle exit
+    try:
+        sys.exit(0)
+    except SystemExit:
+        os._exit(0)
+
+signal.signal(signal.SIGINT, _shutdown_handler)
+signal.signal(signal.SIGTERM, _shutdown_handler)
+
 # --- Routes
 
 @app.route('/')
@@ -192,6 +257,20 @@ def sensor_command(sensor_id):
                 }
                 LATEST[sensor_id] = payload
                 socketio.emit('sensor_update', payload)
+
+                try:
+                    evt = SimpleNamespace(
+                        pi_id=dev_id,
+                        device=sensor_id,
+                        sensor_type=sensor_type,
+                        value=payload_val,
+                        simulated=payload['simulated'],
+                        timestamp=payload['ts']
+                    )
+                    event_queue.put(evt)
+                except Exception as e:
+                    print("Failed to enqueue sensor event:", e)
+
                 return jsonify({"ok": True, "payload": payload})
     return jsonify({"error":"sensor not found"}), 404
 
@@ -210,6 +289,20 @@ def emitter():
                 }
                 LATEST[s['id']] = payload
                 socketio.emit('sensor_update', payload)
+
+                try:
+                    evt = SimpleNamespace(
+                        pi_id=dev_id,
+                        device=s['id'],
+                        sensor_type=s.get('type'),
+                        value=val,
+                        simulated=payload['simulated'],
+                        timestamp=payload['ts']
+                    )
+                    event_queue.put(evt)
+                except Exception as e:
+                    print("Failed to enqueue emitter event:", e)
+
                 socketio.sleep(0.01)
         socketio.sleep(5)
 
@@ -219,6 +312,7 @@ def on_connect():
         socketio.emit('sensor_update', v)
 
 if __name__ == "__main__":
+    # initialize LATEST
     for dev_id, sensors in SENSORS.items():
         for s in sensors:
             LATEST[s['id']] = {
@@ -228,5 +322,8 @@ if __name__ == "__main__":
                 'simulated': bool(s.get('simulated', True)),
                 'ts': int(time.time()*1000)
             }
+
+    start_mqtt_background(client_id="WEBAPP", batch_size=10, interval=5)
+
     socketio.start_background_task(emitter)
     socketio.run(app, host='0.0.0.0', port=5000)
