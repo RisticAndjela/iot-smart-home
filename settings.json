@@ -7,8 +7,8 @@
       "DMS1": { "device": "DMS1", "pi":"1", "type": "membrane", "simulated": true,"mqtt_topic": "sensors/pi1/dms", "pin": 12}
     },
     "actuators": {
-      "DL": { "device": "DL", "pi": "1", "type": "light", "simulated": true, "mqtt_topic": "actuators/pi1/dl1", "pin": 17 },
-      "DB": { "device": "DB", "pi": "1", "type": "buzzer", "simulated": true, "mqtt_topic": "actuators/pi1/db1", "pin": 27 }
+      "DL": { "device": "DL", "pi": "1", "type": "light", "simulated": true, "mqtt_topic": "actuators/pi1/dl1", "pins": { "r": 13, "g": 19, "b":12 } },
+      "DB": { "device": "DB", "pi": "1", "type": "buzzer", "simulated": true, "mqtt_topic": "actuators/pi1/db1", "pin": 17 }
     }
   },
 

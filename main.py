@@ -42,6 +42,31 @@ def closing_main(stop_event, controller_thread, command_thread, threads):
     for t in threads: t.join()
     print("App stopped cleanly.")
 
+def on_message_received(client, userdata, msg):
+    import json
+    try:
+        payload = json.loads(msg.payload.decode())
+        topic = msg.topic
+        print(f"\n[MQTT] Received command on {topic}: {payload}")
+
+        # Ako je stigla komanda za DB (Buzzer)
+        if "db" in topic:
+            if payload.get("value") == "on" or payload.get("command") == "on":
+                if db: # Proveravamo da li je objekat db kreiran
+                    db.on()
+            
+        # Opciono: Ako želiš i svetlo (DL) da kontrolišeš
+        if "dl" in topic:
+            if dl:
+                val = payload.get("value")
+                if val == "on":
+                    dl.on(color='white') 
+                else:
+                    dl.off()
+                    
+    except Exception as e:
+        print(f"Error handling MQTT message: {e}")
+
 if __name__ == "__main__":
     print("Starting app")
     settings = load_settings()
@@ -49,7 +74,7 @@ if __name__ == "__main__":
     stop_event = threading.Event()
 
     try:
-        mqtt_client = create_mqtt_client()
+        mqtt_client = create_mqtt_client(on_message_callback=on_message_received)
         publisher_thread = threading.Thread(
             target=batch_publisher,
             args=(mqtt_client, stop_event),
@@ -84,6 +109,7 @@ if __name__ == "__main__":
                 if 'DPIR2' in sensors: run_pir(sensors['DPIR2'], threads, stop_event)
                 if 'BTN' in sensors: run_btn(sensors['BTN'], threads, stop_event)
                 if 'DHT3' in sensors: run_dht(sensors['DHT3'], threads, stop_event)
+
                 if 'GSG' in sensors: run_gyro(sensors['GSG'], threads, stop_event)
             # --- SENZORI PI 3 ---
             if pi_id == "PI3":
@@ -93,7 +119,11 @@ if __name__ == "__main__":
                 if "DPIR3" in sensors: run_pir(sensors['DPIR3'], threads, stop_event)
             # --- AKTUATORI ---
             if 'DL' in actuators:
-                dl = DoorLight(pin=actuators['DL']['pin'])
+                pins_config = actuators['DL'].get('pins')
+                if pins_config:
+                    dl = DoorLight(pins=pins_config)
+                else:
+                    dl = DoorLight(pins={'r': actuators['DL']['pin'], 'g': 0, 'b': 0})
             if 'DB' in actuators:
                 db = DoorBuzzer(pin=actuators['DB']['pin'])
             if pi_id == "PI3" and 'BRGB' in actuators:
@@ -109,7 +139,7 @@ if __name__ == "__main__":
         command_thread = threading.Thread(target=command_loop, args=(stop_event,), daemon=True)
         command_thread.start()
 
-        console_loop(stop_event)
+        console_loop(stop_event, dl, db)
 
     except KeyboardInterrupt:
         print("KeyboardInterrupt detected.")

@@ -3,13 +3,12 @@ from paho.mqtt import client as mqtt_client
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-# --- PODEŠAVANJA ---
-influx_url = "http://localhost:8086"
+influx_url = "http://localhost:8086" #192.168.107.170
 influx_token = "iot-super-token"     
 influx_org = "FTN"                   
 influx_bucket = "iot-sensor-report"  
 
-mqtt_broker = "localhost"
+mqtt_broker = "localhost" #192.168.107.170
 mqtt_topic = "sensors/#"
 
 def write_to_influx(data):
