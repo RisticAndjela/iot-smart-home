@@ -1,28 +1,106 @@
 import os
+import sys
 import json
 import random
 import time
 import threading
 import signal
-import sys
 from types import SimpleNamespace
+from typing import Optional
+from types import SimpleNamespace
+import time
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_socketio import SocketIO
-import os, sys
+
+import logging, sys
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+logger.info("App start")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
-    
+
+try:
+    import RPi.GPIO as GPIO
+except Exception:
+    try:
+        import fake_rpi
+        if hasattr(fake_rpi, "RPi"): sys.modules['RPi'] = fake_rpi.RPi
+        if hasattr(fake_rpi, "RPi") and hasattr(fake_rpi.RPi, "GPIO"): sys.modules['RPi.GPIO'] = fake_rpi.RPi.GPIO
+        import RPi.GPIO as GPIO  # type: ignore
+    except Exception:
+        import types
+        class _GPIOShim:
+            BCM = 11
+            OUT = 1
+            IN = 0
+            PUD_UP = 2
+            PUD_DOWN = 3
+
+            def __init__(self):
+                self._pin_states = {}
+            def setmode(self, mode):
+                pass
+            def setup(self, pin, mode, pull_up_down=None):
+                self._pin_states[pin] = 0
+            def output(self, pin, value):
+                self._pin_states[pin] = value
+            def input(self, pin):
+                return self._pin_states.get(pin, 0)
+            def setwarnings(self, flag):
+                pass
+            def cleanup(self):
+                self._pin_states.clear()
+        fake_rpi_mod = types.ModuleType('fake_rpi')
+        fake_rpi_mod.RPi = types.SimpleNamespace(GPIO=_GPIOShim())
+        sys.modules['fake_rpi'] = fake_rpi_mod
+        rpimod = types.ModuleType('RPi')
+        rpimod.GPIO = _GPIOShim()
+        sys.modules['RPi'] = rpimod
+        gpmod = types.ModuleType('RPi.GPIO')
+        gpio_shim = _GPIOShim()
+        gpmod.setmode = gpio_shim.setmode
+        gpmod.setup = gpio_shim.setup
+        gpmod.output = gpio_shim.output
+        gpmod.input = gpio_shim.input
+        gpmod.cleanup = gpio_shim.cleanup
+        gpmod.setwarnings = gpio_shim.setwarnings
+        gpmod.BCM = gpio_shim.BCM
+        gpmod.OUT = gpio_shim.OUT
+        gpmod.IN = gpio_shim.IN
+        gpmod.PUD_UP = gpio_shim.PUD_UP
+        gpmod.PUD_DOWN = gpio_shim.PUD_DOWN
+        sys.modules['RPi.GPIO'] = gpmod
+        import RPi.GPIO as GPIO 
+try:
+    GPIO.setmode(GPIO.BCM)
+except Exception:
+    pass
+
 from messaging.client import create_mqtt_client
 from messaging import event_queue
 from messaging.batch_publisher import batch_publisher
+from simulation.components.ds import run_ds
+from simulation.components.uds import run_uds
+from simulation.components.pir import run_pir
+from simulation.components.dms import run_dms
+from simulation.components.dht import run_dht
+from simulation.components.gyro import run_gyro
+from simulation.components.btn import run_btn
+from simulation.actuators.display import run_4sd
+from simulation.actuators.dl1 import DoorLight
+from simulation.actuators.db1 import DoorBuzzer
+from simulation.actuators.controller import run_controller
 
-# --- Paths
 SETTINGS_PATH = os.path.abspath(os.path.join(BASE_DIR, '..', 'settings.json'))
-FRONTEND_DIR = BASE_DIR                                      # index/templates are expected under frontend/
+FRONTEND_DIR = BASE_DIR
 TEMPLATES_INDEX = os.path.join(FRONTEND_DIR, 'templates', 'index.html')
 STATIC_DIR = os.path.join(FRONTEND_DIR, 'static')
 
@@ -36,7 +114,6 @@ print("STATIC_DIR:", STATIC_DIR)
 print("index exists?:", os.path.exists(TEMPLATES_INDEX))
 print("settings exists?:", os.path.exists(SETTINGS_PATH))
 
-# --- Load settings.json
 raw_settings = {}
 if os.path.exists(SETTINGS_PATH):
     try:
@@ -58,6 +135,7 @@ for pi_key, pi_val in raw_settings.items():
         "id": dev_id,
         "name": f"{pi_key}",
         "pi": pi_key.replace('PI',''),
+        "pi_key": pi_key,
         "description": pi_val.get('description', '')
     })
     SENSORS[dev_id] = []
@@ -119,7 +197,6 @@ def _random_value_for(sensor_type):
         return random.choice(['#ff0000','#00ff00','#0000ff','#ffffff'])
     return round(random.random()*100, 2)
 
-# --- MQTT setup: create client and background batch publisher thread
 mqtt_client = None
 _mqtt_stop_event = threading.Event()
 _mqtt_thread = None
@@ -156,22 +233,17 @@ def stop_mqtt_background():
     except Exception as e:
         print("Error while stopping MQTT:", e)
 
-# graceful shutdown handlers
-def _shutdown_handler(signum, frame):
-    print("Received shutdown signal:", signum)
-    stop_mqtt_background()
-    # give some time to stop
-    time.sleep(0.5)
-    # let socketio/Flask handle exit
-    try:
-        sys.exit(0)
-    except SystemExit:
-        os._exit(0)
+app_threads = []            # will be passed to run_* functions (they append threads here)
+sim_registry = {}          # key -> { 'pi','id','stop_event','threads' }
+sim_lock = threading.Lock()
 
-signal.signal(signal.SIGINT, _shutdown_handler)
-signal.signal(signal.SIGTERM, _shutdown_handler)
+def _key(pi, ident):
+    return f"{pi or ''}:{ident or ''}"
 
-# --- Routes
+def _get_conf(pi, ident):
+    if pi not in raw_settings:
+        return None
+    return raw_settings[pi].get('sensors', {}).get(ident) or raw_settings[pi].get('actuators', {}).get(ident)
 
 @app.route('/')
 def index():
@@ -203,78 +275,279 @@ def api_device_details(device_id):
     actuators = ACTUATORS.get(device_id, [])
     return jsonify({**dev, "sensors": sensors, "actuators": actuators})
 
-@app.route('/api/data')
-def api_data():
-    return jsonify({"devices": DEVICES, "latest": LATEST})
+@app.route('/api/sim/start', methods=['POST'])
+def api_sim_start():
+    """
+    Body examples:
+      {"pi":"PI2","id":"DS2"}  -> starts that sensor using its run_* function
+      {"component":"controller"} -> starts controller (finds DL/DB in settings)
+    """
+    body = request.get_json() or {}
+    component = (body.get('component') or '').lower() if body.get('component') else None
+    pi = body.get('pi')
+    ident = body.get('id')
+    if component == 'controller':
+        key = 'controller'
+    else:
+        if not pi or not ident:
+            return jsonify({"error":"pi and id required"}), 400
+        key = _key(pi, ident)
+
+    with sim_lock:
+        if key in sim_registry:
+            return jsonify({"ok": False, "reason": "already running", "key": key}), 409
+
+        stop_event = threading.Event()
+        sim_registry[key] = {"pi": pi, "id": ident, "stop_event": stop_event, "threads": []}
+
+        try:
+            # controller special case
+            if component == 'controller':
+                # try to construct dl and db from settings (like in main.py)
+                dl_obj = None
+                db_obj = None
+                for pi_k, pi_conf in raw_settings.items():
+                    for a_k, a_c in pi_conf.get('actuators', {}).items():
+                        t = a_c.get('type','').lower()
+                        if not dl_obj and t in ('brgb','rgb','led-rgb','light'):
+                            dl_obj = DoorLight(pins=a_c.get('pins') or {'r': a_c.get('pin'), 'g':0, 'b':0})
+                        if not db_obj and t in ('buzzer','db','led','binary'):
+                            db_obj = DoorBuzzer(pin=a_c.get('pin'))
+                        if dl_obj and db_obj:
+                            break
+                    if dl_obj and db_obj:
+                        break
+                if not dl_obj or not db_obj:
+                    del sim_registry[key]
+                    return jsonify({"error":"dl/db not found for controller"}), 404
+                thr = run_controller(dl_obj, db_obj, stop_event)
+                sim_registry[key]["threads"].append(thr)
+                sim_registry[key]["instance"] = {"dl": dl_obj, "db": db_obj}
+                return jsonify({"ok": True, "key": key})
+
+            # normal sensor/actuator start
+            conf = _get_conf(pi, ident)
+            if conf is None:
+                del sim_registry[key]
+                return jsonify({"error":"config not found"}), 404
+
+            # choose runner by id prefix or by type
+            prefix = ''.join([c for c in ident if not c.isdigit()]).upper()
+            stype = (conf.get('type') or '').lower()
+
+            # map to runner
+            if prefix.startswith('DS'):
+                run_ds(conf, app_threads, stop_event)
+            elif prefix.startswith('DUS') or stype in ('ultrasonic','distance','ir'):
+                run_uds(conf, app_threads, stop_event)
+            elif prefix.startswith('DPIR') or stype in ('pir','motion'):
+                run_pir(conf, app_threads, stop_event)
+            elif prefix.startswith('DMS'):
+                run_dms(conf, app_threads, stop_event)
+            elif prefix.startswith('DHT') or stype.startswith('dht') or stype in ('t/h','temperature','humidity'):
+                run_dht(conf, app_threads, stop_event)
+            elif prefix.startswith('GSG') or stype in ('gyro','gsg'):
+                run_gyro(conf, app_threads, stop_event)
+            elif prefix in ('BTN',):
+                run_btn(conf, app_threads, stop_event)
+            elif prefix == '4SD' or stype in ('4sd','display','lcd','text'):
+                run_4sd(conf, app_threads, stop_event)
+            elif prefix in ('DL',):
+                # create DoorLight instance and store it
+                dl_obj = DoorLight(pins=conf.get('pins') or {'r': conf.get('pin'), 'g':0, 'b':0})
+                sim_registry[key]["instance"] = dl_obj
+            elif prefix in ('DB',):
+                db_obj = DoorBuzzer(pin=conf.get('pin'))
+                sim_registry[key]["instance"] = db_obj
+            else:
+                # fallback: if type indicates binary actuator, create DoorBuzzer-like or just store config
+                sim_registry[key]["info"] = {"started": False, "note": "unknown component, no runner called"}
+                del sim_registry[key]
+                return jsonify({"error":"unknown component type/prefix"}), 400
+
+            # run_* functions append threads into app_threads; store snapshot of new threads
+            sim_registry[key]["threads"] = list(app_threads)
+            return jsonify({"ok": True, "key": key})
+        except Exception as e:
+            # cleanup on error
+            sim_registry.pop(key, None)
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route('/api/sim/stop', methods=['POST'])
+def api_sim_stop():
+    body = request.get_json() or {}
+    component = (body.get('component') or '').lower() if body.get('component') else None
+    pi = body.get('pi')
+    ident = body.get('id')
+    if component == 'controller':
+        key = 'controller'
+    else:
+        if not pi or not ident:
+            return jsonify({"error":"pi and id required"}), 400
+        key = _key(pi, ident)
+
+    with sim_lock:
+        entry = sim_registry.get(key)
+        if not entry:
+            return jsonify({"ok": False, "reason": "not running", "key": key}), 404
+        try:
+            entry['stop_event'].set()
+            # try to call off() on instances if present
+            inst = entry.get('instance')
+            if inst:
+                if hasattr(inst, 'off'):
+                    try: inst.off()
+                    except Exception: pass
+                if isinstance(inst, dict):
+                    for v in inst.values():
+                        if hasattr(v, 'off'):
+                            try: v.off()
+                            except Exception: pass
+            # join threads if possible (short timeout)
+            for t in entry.get('threads', []):
+                try:
+                    if isinstance(t, threading.Thread):
+                        t.join(timeout=1.0)
+                except Exception:
+                    pass
+            del sim_registry[key]
+            return jsonify({"ok": True, "key": key})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route('/api/sim/status', methods=['GET'])
+def api_sim_status():
+    with sim_lock:
+        out = []
+        for k, v in sim_registry.items():
+            out.append({
+                "key": k,
+                "pi": v.get('pi'),
+                "id": v.get('id'),
+                "running": not bool(v.get('stop_event') and v.get('stop_event').is_set())
+            })
+    return jsonify({"running": out})
 
 @app.route('/api/actuators/<actuator_id>/command', methods=['POST'])
-def actuator_command(actuator_id):
+def api_actuator_command(actuator_id):
     body = request.get_json() or {}
-    for dev_id, acts in ACTUATORS.items():
-        for a in acts:
-            if a['id'] == actuator_id:
-                cmd = body.get('command')
-                val = body.get('value')
-                if cmd == 'toggle' and a.get('kind') == 'binary':
-                    a['state'] = 'on' if a.get('state') != 'on' else 'off'
-                elif cmd == 'set':
-                    a['state'] = val
-                else:
-                    a['state'] = val if val is not None else a.get('state')
-                socketio.emit('actuator_update', {'actuator_id': actuator_id, 'state': a['state']})
-                return jsonify({"ok": True, "state": a['state']})
-    return jsonify({"error": "actuator not found"}), 404
+    with sim_lock:
+        entry = next((v for v in sim_registry.values() if v.get('id') == actuator_id), None)
+    if not entry:
+        return jsonify({"ok": False, "error": "not running", "code": "not_running"}), 404
+    inst = entry.get('instance')
+    if not inst:
+        return jsonify({"ok": False, "error": "no instance available for actuator"}), 400
+
+    cmd = body.get('command')
+    val = body.get('value')
+    state = None
+    try:
+        # common on/off
+        if val == 'on' or cmd == 'on':
+            if hasattr(inst, 'on'):
+                try:
+                    inst.on() if callable(inst.on) else None
+                except TypeError:
+                    # some implementations accept params
+                    try: inst.on(val)
+                    except Exception: pass
+            state = 'on'
+        elif val == 'off' or cmd == 'off':
+            if hasattr(inst, 'off'):
+                inst.off()
+            state = 'off'
+        else:
+            # if value looks like a color string, try to pass as color for lights
+            if isinstance(val, str) and val.startswith('#') and hasattr(inst, 'on'):
+                try:
+                    inst.on(color=val)
+                    state = val
+                except TypeError:
+                    try:
+                        inst.on(val)
+                        state = val
+                    except Exception:
+                        pass
+            else:
+                # generic set if available
+                if hasattr(inst, 'set'):
+                    try:
+                        inst.set(val)
+                        state = 'set'
+                    except Exception:
+                        pass
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    return jsonify({"ok": True, "state": state})
 
 @app.route('/api/sensors/<sensor_id>/command', methods=['POST'])
-def sensor_command(sensor_id):
+def api_sensor_command(sensor_id):
     body = request.get_json() or {}
-    cmd = body.get('command')
-    val = body.get('value', None)
+    with sim_lock:
+        entry = next((v for v in sim_registry.values() if v.get('id') == sensor_id), None)
+    if not entry:
+        # fallback: try to find conf and enqueue a synthetic event so UI sees something
+        conf = None
+        for pk, pv in raw_settings.items():
+            if sensor_id in pv.get('sensors', {}):
+                conf = pv['sensors'][sensor_id]
+                pi_key = pk
+                break
+        # enqueue a simple event as fallback
+        try:
+            evt = SimpleNamespace(
+                pi_id=pi_key if conf else None,
+                device=sensor_id,
+                sensor_type=conf.get('type') if conf else None,
+                value=body.get('value') if body.get('value') is not None else _random_value_for(conf.get('type') if conf else None),
+                simulated=True,
+                timestamp=int(time.time()*1000)
+            )
+            event_queue.put(evt)
+        except Exception:
+            pass
+        return jsonify({"ok": True, "payload": {"note": "enqueued fallback event"}}), 200
 
-    for dev_id, sensors in SENSORS.items():
-        for s in sensors:
-            if s['id'] == sensor_id:
-                sensor_type = str(s.get('type','')).lower()
-                if cmd == 'toggle' and sensor_type in ('binary','door','button','membrane','ir','motion'):
-                    prev = LATEST.get(sensor_id, {}).get('value', 0)
-                    newv = 0 if prev else 1
-                    payload_val = newv
-                elif cmd == 'set':
-                    payload_val = val
-                elif cmd == 'trigger':
-                    payload_val = val if val is not None else 1
-                else:
-                    if val is None:
-                        return jsonify({"error":"missing command or value"}), 400
-                    payload_val = val
+    inst = entry.get('instance')
+    resp_payload = {"note": "ok"}
+    try:
+        cmd = body.get('command')
+        val = body.get('value')
+        if inst:
+            # try known ops
+            if cmd == 'trigger' and hasattr(inst, 'trigger'):
+                inst.trigger()
+            elif cmd == 'toggle' and hasattr(inst, 'toggle'):
+                inst.toggle()
+            elif cmd == 'set' and hasattr(inst, 'set'):
+                inst.set(val)
+            else:
+                # if instance has a generic method to accept data -> try
+                if hasattr(inst, 'set_value'):
+                    try:
+                        inst.set_value(val)
+                    except Exception:
+                        pass
+        else:
+            # enqueue an event that matches shape used elsewhere
+            evt = SimpleNamespace(
+                pi_id=entry.get('pi'),
+                device=sensor_id,
+                sensor_type=_get_conf(entry.get('pi'), sensor_id).get('type') if _get_conf(entry.get('pi'), sensor_id) else None,
+                value=val if val is not None else _random_value_for(None),
+                simulated=True,
+                timestamp=int(time.time()*1000)
+            )
+            event_queue.put(evt)
+            resp_payload['enqueued'] = True
+        resp_payload['value'] = val
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
-                payload = {
-                    'device_id': dev_id,
-                    'sensor_id': sensor_id,
-                    'value': payload_val,
-                    'simulated': True,
-                    'ts': int(time.time()*1000)
-                }
-                LATEST[sensor_id] = payload
-                socketio.emit('sensor_update', payload)
+    return jsonify({"ok": True, "payload": resp_payload}), 200
 
-                try:
-                    evt = SimpleNamespace(
-                        pi_id=dev_id,
-                        device=sensor_id,
-                        sensor_type=sensor_type,
-                        value=payload_val,
-                        simulated=payload['simulated'],
-                        timestamp=payload['ts']
-                    )
-                    event_queue.put(evt)
-                except Exception as e:
-                    print("Failed to enqueue sensor event:", e)
-
-                return jsonify({"ok": True, "payload": payload})
-    return jsonify({"error":"sensor not found"}), 404
-
-# --- Background emitter
 def emitter():
     while True:
         for dev_id, sensors in SENSORS.items():
@@ -311,8 +584,24 @@ def on_connect():
     for v in LATEST.values():
         socketio.emit('sensor_update', v)
 
+def _shutdown_handler(signum, frame):
+    print("Received shutdown signal:", signum)
+    stop_mqtt_background()
+    with sim_lock:
+        for entry in list(sim_registry.values()):
+            ev = entry.get('stop_event')
+            if ev:
+                ev.set()
+    time.sleep(0.5)
+    try:
+        sys.exit(0)
+    except SystemExit:
+        os._exit(0)
+
+signal.signal(signal.SIGINT, _shutdown_handler)
+signal.signal(signal.SIGTERM, _shutdown_handler)
+
 if __name__ == "__main__":
-    # initialize LATEST
     for dev_id, sensors in SENSORS.items():
         for s in sensors:
             LATEST[s['id']] = {
@@ -324,6 +613,5 @@ if __name__ == "__main__":
             }
 
     start_mqtt_background(client_id="WEBAPP", batch_size=10, interval=5)
-
     socketio.start_background_task(emitter)
     socketio.run(app, host='0.0.0.0', port=5000)

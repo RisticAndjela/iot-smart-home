@@ -26,16 +26,16 @@
       "4SD": { "device": "4SD", "pi": "2", "type": "display", "simulated": true, "mqtt_topic": "actuators/pi2/4sd", "pins": { "clk": 18, "dio": 19 } }
     }
   },
-  "PI3": {
+  "pi3": {
     "sensors": {
-      "DHT1": {"device": "DHT1","pi":"3","type": "dht","simulated": true, "mqtt_topic": "sensors/PI3/DHT1", "pin": 4},
-      "DHT2": {"device": "DHT2","pi":"3","type": "dht","simulated": true,"mqtt_topic": "sensors/PI3/DHT2", "pin": 5},
-      "IR": {"device": "IR","pi":"3","type": "infrared","simulated": true,"mqtt_topic": "sensors/PI3/IR", "pin": 6},
-      "DPIR3": {"device": "DPIR3","pi":"3","type": "motion","simulated": true,"mqtt_topic": "sensors/PI3/DPIR3", "pin": 7}
+      "DHT1": {"device": "DHT1","pi":"3","type": "dht","simulated": true, "mqtt_topic": "sensors/pi3/dht1", "pin": 4},
+      "DHT2": {"device": "DHT2","pi":"3","type": "dht","simulated": true,"mqtt_topic": "sensors/pi3/dht2", "pin": 5},
+      "IR": {"device": "IR","pi":"3","type": "infrared","simulated": true,"mqtt_topic": "sensors/pi3/ir", "pin": 6},
+      "DPIR3": {"device": "DPIR3","pi":"3","type": "motion","simulated": true,"mqtt_topic": "sensors/pi3/dpir3", "pin": 7}
     },
     "actuators": {
-      "BRGB": { "device": "BRGB","pi":"3", "type": "rgb", "simulated": true, "mqtt_topic": "actuators/PI3/BRGB", "state": "off" },
-      "LCD": {"device": "LCD","pi":"3","type": "display","simulated": true,"mqtt_topic": "actuators/PI3/LCD","state": ""}
+      "BRGB": { "device": "BRGB","pi":"3", "type": "rgb", "simulated": true, "mqtt_topic": "actuators/pi3/brgb", "state": "off" },
+      "LCD": {"device": "LCD","pi":"3","type": "display","simulated": true,"mqtt_topic": "actuators/pi3/lcd","state": ""}
     }
   }
 }
