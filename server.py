@@ -16,7 +16,6 @@ def write_to_influx(data):
     write_api = client.write_api(write_options=SYNCHRONOUS)
     
     try:
-        # Odredjujemo naziv merenja (Measurement)
         measurement_name = data.get("sensor_type", "SensorData").capitalize()
         if data.get("device") == "4SD": 
             measurement_name = "Kitchen_Timer"
@@ -25,13 +24,26 @@ def write_to_influx(data):
             .tag("device", data.get("device", "unknown")) \
             .tag("pi", data.get("pi", "unknown")) \
             .tag("simulated", str(data.get("simulated", True))) \
-            .tag("type", data.get("sensor_type", "generic")) \
-            .field("value", float(data.get("value", 0.0)))
+            .tag("type", data.get("sensor_type", "generic"))
+
+        # --- FINALNI FIKS ZA STRING GREŠKU ---
+        val = data.get("value", 0.0)
+        try:
+            # Ako je broj (PeopleCount, Temp...), ide u field 'value'
+            numeric_val = float(val)
+            p.field("value", numeric_val)
+        except (ValueError, TypeError):
+            # Ako je tekst (LCD poruka), ide u field 'message'
+            p.field("message", str(val))
+        # -------------------------------------
             
         write_api.write(bucket=influx_bucket, org=influx_org, record=p)
-        print(f"Upisano u bazu: {data.get('device')} ({measurement_name}) = {data.get('value')}")
+        print(f"Upisano u bazu: {data.get('device')} ({measurement_name})")
+        
     except Exception as e:
         print(f"Greska pri upisu u Influx: {e}")
+    finally:
+        client.close() # Dobra praksa da zatvoriš klijent
 
 def on_connect(client, userdata, flags, rc):
     print("Connected to MQTT Broker!")

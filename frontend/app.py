@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+# Full frontend+sim server with Socket.IO and simulation endpoints.
+# Replace your current frontend/app.py with this file.
+
 import os
 import sys
 import json
@@ -6,14 +10,12 @@ import time
 import threading
 import signal
 from types import SimpleNamespace
-from typing import Optional
-from types import SimpleNamespace
-import time
+from typing import Dict, Any, Optional
+import logging
 
-from flask import Flask, jsonify, request, send_file, send_from_directory
+from flask import Flask, jsonify, request, send_file, send_from_directory, abort
 from flask_socketio import SocketIO
 
-import logging, sys
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(name)s: %(message)s',
@@ -27,13 +29,14 @@ REPO_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+# Try to provide fake RPi if missing (keeps simulation safe on non-RPi)
 try:
     import RPi.GPIO as GPIO
 except Exception:
     try:
         import fake_rpi
-        if hasattr(fake_rpi, "RPi"): sys.modules['RPi'] = fake_rpi.RPi
-        if hasattr(fake_rpi, "RPi") and hasattr(fake_rpi.RPi, "GPIO"): sys.modules['RPi.GPIO'] = fake_rpi.RPi.GPIO
+        if hasattr(fake_rpi, "RPi"): sys.modules['Rp i'] = fake_rpi.RPi
+        if hasattr(fake_rpi, "RPi") and hasattr(fake_rpi.RPi, "GPIO"): sys.modules['Rp i.GPIO'] = fake_rpi.RPi.GPIO
         import RPi.GPIO as GPIO  # type: ignore
     except Exception:
         import types
@@ -43,88 +46,109 @@ except Exception:
             IN = 0
             PUD_UP = 2
             PUD_DOWN = 3
-
             def __init__(self):
                 self._pin_states = {}
-            def setmode(self, mode):
-                pass
-            def setup(self, pin, mode, pull_up_down=None):
-                self._pin_states[pin] = 0
-            def output(self, pin, value):
-                self._pin_states[pin] = value
-            def input(self, pin):
-                return self._pin_states.get(pin, 0)
-            def setwarnings(self, flag):
-                pass
-            def cleanup(self):
-                self._pin_states.clear()
-        fake_rpi_mod = types.ModuleType('fake_rpi')
-        fake_rpi_mod.RPi = types.SimpleNamespace(GPIO=_GPIOShim())
-        sys.modules['fake_rpi'] = fake_rpi_mod
+            def setmode(self, mode): pass
+            def setup(self, pin, mode, pull_up_down=None): self._pin_states[pin] = 0
+            def output(self, pin, value): self._pin_states[pin] = value
+            def input(self, pin): return self._pin_states.get(pin, 0)
+            def setwarnings(self, flag): pass
+            def cleanup(self): self._pin_states.clear()
         rpimod = types.ModuleType('RPi')
         rpimod.GPIO = _GPIOShim()
         sys.modules['RPi'] = rpimod
         gpmod = types.ModuleType('RPi.GPIO')
-        gpio_shim = _GPIOShim()
-        gpmod.setmode = gpio_shim.setmode
-        gpmod.setup = gpio_shim.setup
-        gpmod.output = gpio_shim.output
-        gpmod.input = gpio_shim.input
-        gpmod.cleanup = gpio_shim.cleanup
-        gpmod.setwarnings = gpio_shim.setwarnings
-        gpmod.BCM = gpio_shim.BCM
-        gpmod.OUT = gpio_shim.OUT
-        gpmod.IN = gpio_shim.IN
-        gpmod.PUD_UP = gpio_shim.PUD_UP
-        gpmod.PUD_DOWN = gpio_shim.PUD_DOWN
+        gp = _GPIOShim()
+        gpmod.setmode = gp.setmode
+        gpmod.setup = gp.setup
+        gpmod.output = gp.output
+        gpmod.input = gp.input
+        gpmod.cleanup = gp.cleanup
+        gpmod.setwarnings = gp.setwarnings
+        gpmod.BCM = gp.BCM
+        gpmod.OUT = gp.OUT
+        gpmod.IN = gp.IN
+        gpmod.PUD_UP = gp.PUD_UP
+        gpmod.PUD_DOWN = gp.PUD_DOWN
         sys.modules['RPi.GPIO'] = gpmod
-        import RPi.GPIO as GPIO 
+        import RPi.GPIO as GPIO
+
 try:
     GPIO.setmode(GPIO.BCM)
 except Exception:
     pass
 
-from messaging.client import create_mqtt_client
-from messaging import event_queue
-from messaging.batch_publisher import batch_publisher
-from simulation.components.ds import run_ds
-from simulation.components.uds import run_uds
-from simulation.components.pir import run_pir
-from simulation.components.dms import run_dms
-from simulation.components.dht import run_dht
-from simulation.components.gyro import run_gyro
-from simulation.components.btn import run_btn
-from simulation.actuators.display import run_4sd
-from simulation.actuators.dl1 import DoorLight
-from simulation.actuators.db1 import DoorBuzzer
-from simulation.actuators.controller import run_controller
+# If you have messaging/mqtt modules in project, they will be imported if present.
+# If not, the simulation will still run locally without MQTT.
+try:
+    from messaging.client import create_mqtt_client
+    from messaging import event_queue
+    from messaging.batch_publisher import batch_publisher
+except Exception:
+    # lightweight fallback queue
+    import queue
+    event_queue = queue.Queue()
+    def create_mqtt_client(*a, **k): return None
+    def batch_publisher(*a, **k): 
+        while True:
+            time.sleep(1)
 
+# Import available simulation runners if present, else provide placeholders
+def _safe_import(name):
+    try:
+        mod = __import__(name, fromlist=['*'])
+        return mod
+    except Exception:
+        return None
+
+run_ds = _safe_import('simulation.components.ds').run_ds if _safe_import('simulation.components.ds') else lambda *a, **k: None
+run_uds = _safe_import('simulation.components.uds').run_uds if _safe_import('simulation.components.uds') else lambda *a, **k: None
+run_pir = _safe_import('simulation.components.pir').run_pir if _safe_import('simulation.components.pir') else lambda *a, **k: None
+run_dms = _safe_import('simulation.components.dms').run_dms if _safe_import('simulation.components.dms') else lambda *a, **k: None
+run_dht = _safe_import('simulation.components.dht').run_dht if _safe_import('simulation.components.dht') else lambda *a, **k: None
+run_gyro = _safe_import('simulation.components.gyro').run_gyro if _safe_import('simulation.components.gyro') else lambda *a, **k: None
+run_btn = _safe_import('simulation.components.btn').run_btn if _safe_import('simulation.components.btn') else lambda *a, **k: None
+run_4sd = _safe_import('simulation.actuators.display').run_4sd if _safe_import('simulation.actuators.display') else lambda *a, **k: None
+
+DoorLight = _safe_import('simulation.actuators.dl1').DoorLight if _safe_import('simulation.actuators.dl1') else None
+DoorBuzzer = _safe_import('simulation.actuators.db1').DoorBuzzer if _safe_import('simulation.actuators.db1') else None
+try:
+    run_controller = _safe_import('simulation.actuators.controller').run_controller
+except Exception:
+    def run_controller(*a, **k): return None
+
+# Paths
 SETTINGS_PATH = os.path.abspath(os.path.join(BASE_DIR, '..', 'settings.json'))
 FRONTEND_DIR = BASE_DIR
 TEMPLATES_INDEX = os.path.join(FRONTEND_DIR, 'templates', 'index.html')
 STATIC_DIR = os.path.join(FRONTEND_DIR, 'static')
 
-app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static')
+app = Flask(__name__, static_folder=None)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-print("BASE_DIR:", BASE_DIR)
-print("SETTINGS_PATH:", SETTINGS_PATH)
-print("FRONTEND_DIR:", FRONTEND_DIR)
-print("STATIC_DIR:", STATIC_DIR)
-print("index exists?:", os.path.exists(TEMPLATES_INDEX))
-print("settings exists?:", os.path.exists(SETTINGS_PATH))
+logger.info("BASE_DIR: %s", BASE_DIR)
+logger.info("SETTINGS_PATH: %s", SETTINGS_PATH)
+logger.info("FRONTEND_DIR: %s", FRONTEND_DIR)
+logger.info("STATIC_DIR: %s", STATIC_DIR)
 
 raw_settings = {}
 if os.path.exists(SETTINGS_PATH):
     try:
         with open(SETTINGS_PATH, 'r', encoding='utf-8') as f:
             raw_settings = json.load(f)
-            print("Loaded settings.json keys:", list(raw_settings.keys()))
+            logger.info("Loaded settings.json keys: %s", list(raw_settings.keys()))
     except Exception as e:
-        print("Failed to load settings.json:", e)
+        logger.warning("Failed to load settings.json: %s", e)
 else:
-    print("Warning: settings.json not found at", SETTINGS_PATH)
+    logger.warning("Warning: settings.json not found at %s", SETTINGS_PATH)
 
+# Normalize top-level keys to uppercase for consistent behavior
+normalized = {}
+for k, v in raw_settings.items():
+    normalized[k.upper()] = v
+raw_settings = normalized
+
+# Build device lists
 DEVICES = []
 SENSORS = {}
 ACTUATORS = {}
@@ -212,9 +236,9 @@ def start_mqtt_background(client_id="WEBAPP", batch_size=10, interval=5):
             daemon=True
         )
         _mqtt_thread.start()
-        print("Started MQTT client and batch_publisher thread")
+        logger.info("Started MQTT client and batch_publisher thread")
     except Exception as e:
-        print("Failed to start MQTT background:", e)
+        logger.warning("Failed to start MQTT background: %s", e)
 
 def stop_mqtt_background():
     global mqtt_client
@@ -229,12 +253,12 @@ def stop_mqtt_background():
                 mqtt_client.disconnect()
             except Exception:
                 pass
-        print("Stopped MQTT background")
+        logger.info("Stopped MQTT background")
     except Exception as e:
-        print("Error while stopping MQTT:", e)
+        logger.warning("Error while stopping MQTT: %s", e)
 
-app_threads = []            # will be passed to run_* functions (they append threads here)
-sim_registry = {}          # key -> { 'pi','id','stop_event','threads' }
+app_threads = []            # threads run_* might append to this
+sim_registry = {}          # key -> { 'pi','id','stop_event','threads','instance' }
 sim_lock = threading.Lock()
 
 def _key(pi, ident):
@@ -277,11 +301,6 @@ def api_device_details(device_id):
 
 @app.route('/api/sim/start', methods=['POST'])
 def api_sim_start():
-    """
-    Body examples:
-      {"pi":"PI2","id":"DS2"}  -> starts that sensor using its run_* function
-      {"component":"controller"} -> starts controller (finds DL/DB in settings)
-    """
     body = request.get_json() or {}
     component = (body.get('component') or '').lower() if body.get('component') else None
     pi = body.get('pi')
@@ -303,16 +322,17 @@ def api_sim_start():
         try:
             # controller special case
             if component == 'controller':
-                # try to construct dl and db from settings (like in main.py)
                 dl_obj = None
                 db_obj = None
                 for pi_k, pi_conf in raw_settings.items():
                     for a_k, a_c in pi_conf.get('actuators', {}).items():
                         t = a_c.get('type','').lower()
                         if not dl_obj and t in ('brgb','rgb','led-rgb','light'):
-                            dl_obj = DoorLight(pins=a_c.get('pins') or {'r': a_c.get('pin'), 'g':0, 'b':0})
+                            if DoorLight:
+                                dl_obj = DoorLight(pins=a_c.get('pins') or {'r': a_c.get('pin'), 'g':0, 'b':0})
                         if not db_obj and t in ('buzzer','db','led','binary'):
-                            db_obj = DoorBuzzer(pin=a_c.get('pin'))
+                            if DoorBuzzer:
+                                db_obj = DoorBuzzer(pin=a_c.get('pin'))
                         if dl_obj and db_obj:
                             break
                     if dl_obj and db_obj:
@@ -331,11 +351,9 @@ def api_sim_start():
                 del sim_registry[key]
                 return jsonify({"error":"config not found"}), 404
 
-            # choose runner by id prefix or by type
             prefix = ''.join([c for c in ident if not c.isdigit()]).upper()
             stype = (conf.get('type') or '').lower()
 
-            # map to runner
             if prefix.startswith('DS'):
                 run_ds(conf, app_threads, stop_event)
             elif prefix.startswith('DUS') or stype in ('ultrasonic','distance','ir'):
@@ -353,23 +371,21 @@ def api_sim_start():
             elif prefix == '4SD' or stype in ('4sd','display','lcd','text'):
                 run_4sd(conf, app_threads, stop_event)
             elif prefix in ('DL',):
-                # create DoorLight instance and store it
-                dl_obj = DoorLight(pins=conf.get('pins') or {'r': conf.get('pin'), 'g':0, 'b':0})
-                sim_registry[key]["instance"] = dl_obj
+                if DoorLight:
+                    dl_obj = DoorLight(pins=conf.get('pins') or {'r': conf.get('pin'), 'g':0, 'b':0})
+                    sim_registry[key]["instance"] = dl_obj
             elif prefix in ('DB',):
-                db_obj = DoorBuzzer(pin=conf.get('pin'))
-                sim_registry[key]["instance"] = db_obj
+                if DoorBuzzer:
+                    db_obj = DoorBuzzer(pin=conf.get('pin'))
+                    sim_registry[key]["instance"] = db_obj
             else:
-                # fallback: if type indicates binary actuator, create DoorBuzzer-like or just store config
                 sim_registry[key]["info"] = {"started": False, "note": "unknown component, no runner called"}
                 del sim_registry[key]
                 return jsonify({"error":"unknown component type/prefix"}), 400
 
-            # run_* functions append threads into app_threads; store snapshot of new threads
             sim_registry[key]["threads"] = list(app_threads)
             return jsonify({"ok": True, "key": key})
         except Exception as e:
-            # cleanup on error
             sim_registry.pop(key, None)
             return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -392,7 +408,6 @@ def api_sim_stop():
             return jsonify({"ok": False, "reason": "not running", "key": key}), 404
         try:
             entry['stop_event'].set()
-            # try to call off() on instances if present
             inst = entry.get('instance')
             if inst:
                 if hasattr(inst, 'off'):
@@ -403,7 +418,6 @@ def api_sim_stop():
                         if hasattr(v, 'off'):
                             try: v.off()
                             except Exception: pass
-            # join threads if possible (short timeout)
             for t in entry.get('threads', []):
                 try:
                     if isinstance(t, threading.Thread):
@@ -434,7 +448,28 @@ def api_actuator_command(actuator_id):
     with sim_lock:
         entry = next((v for v in sim_registry.values() if v.get('id') == actuator_id), None)
     if not entry:
+        val = body.get('value')
+        cmd = body.get('command')
+        new_state = None
+        for dev_id, acts in ACTUATORS.items():
+            for a in acts:
+                if a.get('id') == actuator_id:
+                    if val in ('on','off'):
+                        new_state = val
+                    elif cmd in ('on','off'):
+                        new_state = cmd
+                    elif isinstance(val, str) and val.startswith('#'):
+                        new_state = val
+                    else:
+                        new_state = val if val is not None else a.get('state')
+                    a['state'] = new_state
+                    try:
+                        socketio.emit('actuator_update', {'actuator_id': actuator_id, 'state': new_state})
+                    except Exception:
+                        pass
+                    return jsonify({"ok": True, "state": new_state}), 200
         return jsonify({"ok": False, "error": "not running", "code": "not_running"}), 404
+
     inst = entry.get('instance')
     if not inst:
         return jsonify({"ok": False, "error": "no instance available for actuator"}), 400
@@ -443,13 +478,11 @@ def api_actuator_command(actuator_id):
     val = body.get('value')
     state = None
     try:
-        # common on/off
         if val == 'on' or cmd == 'on':
             if hasattr(inst, 'on'):
                 try:
                     inst.on() if callable(inst.on) else None
                 except TypeError:
-                    # some implementations accept params
                     try: inst.on(val)
                     except Exception: pass
             state = 'on'
@@ -458,7 +491,6 @@ def api_actuator_command(actuator_id):
                 inst.off()
             state = 'off'
         else:
-            # if value looks like a color string, try to pass as color for lights
             if isinstance(val, str) and val.startswith('#') and hasattr(inst, 'on'):
                 try:
                     inst.on(color=val)
@@ -470,7 +502,6 @@ def api_actuator_command(actuator_id):
                     except Exception:
                         pass
             else:
-                # generic set if available
                 if hasattr(inst, 'set'):
                     try:
                         inst.set(val)
@@ -488,50 +519,75 @@ def api_sensor_command(sensor_id):
     with sim_lock:
         entry = next((v for v in sim_registry.values() if v.get('id') == sensor_id), None)
     if not entry:
-        # fallback: try to find conf and enqueue a synthetic event so UI sees something
+        # fallback: find conf and emit a synthetic sensor_update so UI sees immediate result
         conf = None
+        pi_key = None
         for pk, pv in raw_settings.items():
             if sensor_id in pv.get('sensors', {}):
                 conf = pv['sensors'][sensor_id]
                 pi_key = pk
                 break
-        # enqueue a simple event as fallback
+        val = body.get('value') if body.get('value') is not None else _random_value_for(conf.get('type') if conf else None)
+        payload = {
+            'device_id': pi_key.lower() if pi_key else None,
+            'sensor_id': sensor_id,
+            'value': val,
+            'simulated': True,
+            'ts': int(time.time()*1000)
+        }
+        # try to put into event_queue for existing consumers (keeps backward compatibility)
         try:
             evt = SimpleNamespace(
                 pi_id=pi_key if conf else None,
                 device=sensor_id,
                 sensor_type=conf.get('type') if conf else None,
-                value=body.get('value') if body.get('value') is not None else _random_value_for(conf.get('type') if conf else None),
+                value=val,
                 simulated=True,
-                timestamp=int(time.time()*1000)
+                timestamp=payload['ts']
             )
-            event_queue.put(evt)
+            try:
+                event_queue.put(evt)
+            except Exception:
+                pass
         except Exception:
             pass
-        return jsonify({"ok": True, "payload": {"note": "enqueued fallback event"}}), 200
 
+        # IMPORTANT: emit immediately over Socket.IO so frontend updates without waiting
+        try:
+            socketio.emit('sensor_update', payload)
+        except Exception:
+            logger.exception("Failed to emit fallback sensor_update for %s", sensor_id)
+
+        return jsonify({"ok": True, "payload": {"note": "emitted fallback event", "value": val}}), 200
+
+    # If simulation instance exists, try to call instance methods and emit updated value
     inst = entry.get('instance')
     resp_payload = {"note": "ok"}
     try:
         cmd = body.get('command')
         val = body.get('value')
+        emitted_value = None
+
         if inst:
             # try known ops
             if cmd == 'trigger' and hasattr(inst, 'trigger'):
                 inst.trigger()
+                emitted_value = _random_value_for(_get_conf(entry.get('pi'), sensor_id).get('type') if _get_conf(entry.get('pi'), sensor_id) else None)
             elif cmd == 'toggle' and hasattr(inst, 'toggle'):
                 inst.toggle()
+                emitted_value = _random_value_for(_get_conf(entry.get('pi'), sensor_id).get('type') if _get_conf(entry.get('pi'), sensor_id) else None)
             elif cmd == 'set' and hasattr(inst, 'set'):
                 inst.set(val)
+                emitted_value = val
             else:
-                # if instance has a generic method to accept data -> try
                 if hasattr(inst, 'set_value'):
                     try:
                         inst.set_value(val)
+                        emitted_value = val
                     except Exception:
                         pass
         else:
-            # enqueue an event that matches shape used elsewhere
+            # enqueue fallback event (shouldn't happen because handled above), keep behavior
             evt = SimpleNamespace(
                 pi_id=entry.get('pi'),
                 device=sensor_id,
@@ -540,14 +596,32 @@ def api_sensor_command(sensor_id):
                 simulated=True,
                 timestamp=int(time.time()*1000)
             )
-            event_queue.put(evt)
+            try:
+                event_queue.put(evt)
+            except Exception:
+                pass
             resp_payload['enqueued'] = True
+            emitted_value = evt.value
+
+        # If we have something to emit, send sensor_update so frontend updates instantly
+        if emitted_value is not None:
+            try:
+                payload = {
+                    'device_id': entry.get('pi'),
+                    'sensor_id': sensor_id,
+                    'value': emitted_value,
+                    'simulated': bool(_get_conf(entry.get('pi'), sensor_id) and _get_conf(entry.get('pi'), sensor_id).get('simulated', True)),
+                    'ts': int(time.time()*1000)
+                }
+                socketio.emit('sensor_update', payload)
+            except Exception:
+                logger.exception("Failed to emit sensor_update after command for %s", sensor_id)
+
         resp_payload['value'] = val
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
     return jsonify({"ok": True, "payload": resp_payload}), 200
-
 def emitter():
     while True:
         for dev_id, sensors in SENSORS.items():
@@ -561,8 +635,10 @@ def emitter():
                     'ts': int(time.time()*1000)
                 }
                 LATEST[s['id']] = payload
-                socketio.emit('sensor_update', payload)
-
+                try:
+                    socketio.emit('sensor_update', payload)
+                except Exception:
+                    pass
                 try:
                     evt = SimpleNamespace(
                         pi_id=dev_id,
@@ -572,10 +648,12 @@ def emitter():
                         simulated=payload['simulated'],
                         timestamp=payload['ts']
                     )
-                    event_queue.put(evt)
+                    try:
+                        event_queue.put(evt)
+                    except Exception:
+                        pass
                 except Exception as e:
-                    print("Failed to enqueue emitter event:", e)
-
+                    logger.warning("Failed to enqueue emitter event: %s", e)
                 socketio.sleep(0.01)
         socketio.sleep(5)
 
@@ -585,7 +663,7 @@ def on_connect():
         socketio.emit('sensor_update', v)
 
 def _shutdown_handler(signum, frame):
-    print("Received shutdown signal:", signum)
+    logger.info("Received shutdown signal: %s", signum)
     stop_mqtt_background()
     with sim_lock:
         for entry in list(sim_registry.values()):
