@@ -34,8 +34,8 @@
       "DPIR3": {"device": "DPIR3","pi":"3","type": "motion","simulated": true,"mqtt_topic": "sensors/PI3/DPIR3", "pin": 7}
     },
     "actuators": {
-      "BRGB": { "device": "BRGB","pi":"3", "type": "rgb", "simulated": true, "mqtt_topic": "actuators/PI3/BRGB", "state": "off" },
-      "LCD": {"device": "LCD","pi":"3","type": "display","simulated": true,"mqtt_topic": "actuators/PI3/LCD","state": ""}
+      "BRGB": {"device": "BRGB", "pi": "3","type": "rgb","simulated": true,"mqtt_topic": "actuators/PI3/BRGB","state": "off","pins": {"r": 17,"g": 27,"b": 22}},
+      "LCD": {"device": "LCD","pi": "3","type": "display","simulated": true,"mqtt_topic": "actuators/PI3/LCD","state": "","pins": [12, 16, 18, 23, 24, 25]}
     }
   }
 }

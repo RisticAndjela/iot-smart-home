@@ -3,24 +3,26 @@ import time
 import random
 from messaging.event_queue import event_queue
 from simulation.sensors.sensor_event import SensorEvent
+from simulation.state.global_state import global_state # OBAVEZNO DODAJ
 
 def run_dht(settings, threads, stop_event):
-    device_name = settings['device']
+    device_name = settings['device'] # npr. "DHT1"
     pi_id = settings['pi']
     simulated = settings['simulated']
     
     def dht_loop():
         while not stop_event.is_set():
-            # SIMULACIJA OCITAVANJA
             temp = round(random.uniform(20.0, 30.0), 1)
             hum = round(random.uniform(40.0, 60.0), 1)
             
-            # 1. Ispis u konzolu
+            # --- DODAJ OVO ZA GLOBAL STATE ---
+            # Koristimo lowercase da se poklopi sa kontrolerom
+            d_id = device_name.lower() 
+            global_state[f"{d_id}_temp"] = temp
+            global_state[f"{d_id}_hum"] = hum
+            # ---------------------------------
+
             print(f"[SIM] {device_name} Temp: {temp}°C, Hum: {hum}%")
-            
-            # 2. Slanje u Event Queue (za MQTT)
-            # Saljemo dva eventa (jedan za temp, jedan za hum) ili jedan zajednicki
-            # Ovde saljemo TEMPERATURU
             event_temp = SensorEvent(
                 pi_id=pi_id,
                 device=device_name,
