@@ -29,6 +29,7 @@ class DoorLight:
                 self._set_rgb(0, 1, 0)
             elif color == 'blue':
                 self._set_rgb(0, 0, 1)
+            else: # White
                 self._set_rgb(1, 1, 1)
         except Exception as e:
             print(f"Error turning on RGB: {e}")

@@ -30,9 +30,15 @@ from simulation.actuators.display import run_4sd
 
 from simulation.actuators.dl1 import DoorLight
 from simulation.actuators.db1 import DoorBuzzer
+from simulation.actuators.lcd import run_lcd
+from simulation.actuators.brgb import RGB_LED
+
 from simulation.actuators.controller import run_controller
 from simulation.console.console import console_loop
 from simulation.console.command_bus import command_loop
+from simulation.actuators.controller import get_cmd_queue
+
+from database.sensor_service import write_event_to_influx
 
 def closing_main(stop_event, controller_thread, command_thread, threads):
     print("Stopping all threads... ")
@@ -63,6 +69,12 @@ def on_message_received(client, userdata, msg):
                     dl.on(color='white') 
                 else:
                     dl.off()
+
+        if "brgb" in topic:
+            color = payload.get("value") # npr. "red"
+            if color:
+                get_cmd_queue().put(f"brgb_{color.lower()}")
+                print(f"[MQTT] Komanda prosleđena kontroleru: brgb_{color}")
                     
     except Exception as e:
         print(f"Error handling MQTT message: {e}")
@@ -88,6 +100,7 @@ if __name__ == "__main__":
     command_thread = None
     dl = None
     db = None
+    brgb = None
 
     try:
         for pi_id in settings:
@@ -126,15 +139,23 @@ if __name__ == "__main__":
                     dl = DoorLight(pins={'r': actuators['DL']['pin'], 'g': 0, 'b': 0})
             if 'DB' in actuators:
                 db = DoorBuzzer(pin=actuators['DB']['pin'])
+
             if pi_id == "PI3" and 'BRGB' in actuators:
-                print(f"Running BRGB for PI {pi_id}")
+                brgb = RGB_LED(actuators['BRGB'])
+                print(f"RGB LED initialized on PI3")
+                
             if pi_id == "PI3" and 'LCD' in actuators:
-                print(f"Running LCD for PI {pi_id}")
+                run_lcd(actuators['LCD'], threads, stop_event)
+                print(f"LCD initialized on PI3")
+
             if pi_id == "PI2" and '4SD' in actuators:
                 run_4sd(actuators['4SD'], threads, stop_event)
 
         if dl and db:
-            controller_thread = run_controller(dl, db, stop_event)
+            controller_thread = run_controller(dl, db, brgb, stop_event)
+
+        if brgb:
+            controller_thread = run_controller(dl, db, brgb, stop_event)
         
         command_thread = threading.Thread(target=command_loop, args=(stop_event,), daemon=True)
         command_thread.start()
