@@ -8,8 +8,7 @@ from simulation.state.global_state import global_state
 
 def make_pir_callback(settings, write_callback=None):
     def pir_callback(motion_detected):
-        # Ažuriramo globalno stanje da bi kontroler video pokret
-        key = f"motion_{settings['device'].lower()}" # npr. motion_dpir1
+        key = f"motion_{settings['device'].lower()}" 
         global_state[key] = bool(motion_detected)
         
         print(f"[SIM] {settings['device']} motion detected: {motion_detected}")

@@ -2,6 +2,8 @@ import json
 from paho.mqtt import client as mqtt_client
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
+from simulation.state.global_state import global_state # OBAVEZNO DODAJ
+
 
 influx_url = "http://localhost:8086" #192.168.107.170
 influx_token = "iot-super-token"     
@@ -57,13 +59,26 @@ def on_message(client, userdata, msg):
         # Tema: "sensors/pi1/ds1" ili "actuators/pi2/4sd"
         topic_parts = msg.topic.split('/')
         
-        # 1. Pokusavamo da nadjemo ime uredjaja (zadnji deo teme)
+        # 1. Pokusavamo da nadjemo ime uredjaja
         if "device" not in payload and len(topic_parts) >= 3:
-            payload["device"] = topic_parts[2].upper() # npr. "DS1"
+            payload["device"] = topic_parts[2].upper()
             
-        # 2. Pokusavamo da nadjemo PI ID (srednji deo teme)
+        # 2. Pokusavamo da nadjemo PI ID
         if "pi" not in payload and len(topic_parts) >= 3:
-            payload["pi"] = topic_parts[1] # npr. "pi1"
+            payload["pi"] = topic_parts[1]
+
+        # --- DODAJ OVO ZA LCD PRIKAZ ---
+        device = payload.get("device", "").upper() # npr. "DHT1"
+        sensor_type = payload.get("sensor_type", "") # npr. "temperature"
+        value = payload.get("value")
+
+        if "DHT" in device:
+            d_id = device.lower() # pretvara "DHT1" u "dht1"
+            if sensor_type == "temperature":
+                global_state[f"{d_id}_temp"] = value
+            elif sensor_type == "humidity":
+                global_state[f"{d_id}_hum"] = value
+        # -------------------------------
             
         write_to_influx(payload)
     except Exception as e:

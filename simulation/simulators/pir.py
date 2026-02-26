@@ -4,7 +4,6 @@ import random
 def generate_values():
     while True:
         # Simuliramo detekciju pokreta (0 ili 1)
-        # Malo manja sansa za pokret da ne spamuje
         if random.random() < 0.2: 
             yield 1
         else:

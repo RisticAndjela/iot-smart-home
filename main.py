@@ -6,12 +6,16 @@ import time
 from messaging.batch_publisher import batch_publisher
 from messaging.client import create_mqtt_client
 from settings import load_settings
+import json
+from simulation.state.global_state import global_state
 
 # --- SIMULACIJA ---
 try:
     import RPi.GPIO as GPIO
 except ImportError:
     import fake_rpi
+    fake_rpi.toggle_print(False) 
+
     sys.modules['RPi'] = fake_rpi.RPi
     sys.modules['RPi.GPIO'] = fake_rpi.RPi.GPIO
     import RPi.GPIO as GPIO
@@ -27,6 +31,7 @@ from simulation.components.dht import run_dht
 from simulation.components.gyro import run_gyro
 from simulation.components.btn import run_btn 
 from simulation.actuators.display import run_4sd
+from simulation.components.ir import run_ir
 
 from simulation.actuators.dl1 import DoorLight
 from simulation.actuators.db1 import DoorBuzzer
@@ -49,11 +54,22 @@ def closing_main(stop_event, controller_thread, command_thread, threads):
     print("App stopped cleanly.")
 
 def on_message_received(client, userdata, msg):
-    import json
+ # Dodaj import ovde
     try:
         payload = json.loads(msg.payload.decode())
         topic = msg.topic
-        print(f"\n[MQTT] Received command on {topic}: {payload}")
+        
+        # --- NOVI DEO ZA DHT ---
+        if "sensors" in topic:
+            device = payload.get("device", "").upper()
+            if "DHT" in device:
+                d_id = device.lower()
+                s_type = payload.get("sensor_type")
+                val = payload.get("value")
+                if s_type == "temperature":
+                    global_state[f"{d_id}_temp"] = val
+                elif s_type == "humidity":
+                    global_state[f"{d_id}_hum"] = val
 
         # Ako je stigla komanda za DB (Buzzer)
         if "db" in topic:
@@ -128,7 +144,7 @@ if __name__ == "__main__":
             if pi_id == "PI3":
                 if "DHT1" in sensors: run_dht(sensors['DHT1'], threads, stop_event)
                 if "DHT2" in sensors: run_dht(sensors['DHT2'], threads, stop_event)
-                if "IR" in sensors: run_uds(sensors['IR'], threads, stop_event)
+                if "IR" in sensors: run_ir(sensors['IR'], threads, stop_event)
                 if "DPIR3" in sensors: run_pir(sensors['DPIR3'], threads, stop_event)
             # --- AKTUATORI ---
             if 'DL' in actuators:
@@ -151,10 +167,8 @@ if __name__ == "__main__":
             if pi_id == "PI2" and '4SD' in actuators:
                 run_4sd(actuators['4SD'], threads, stop_event)
 
-        if dl and db:
-            controller_thread = run_controller(dl, db, brgb, stop_event)
-
-        if brgb:
+        # Pokreni kontroler samo JEDNOM ako postoji bilo koji od aktuatora
+        if dl or db or brgb:
             controller_thread = run_controller(dl, db, brgb, stop_event)
         
         command_thread = threading.Thread(target=command_loop, args=(stop_event,), daemon=True)

@@ -8,17 +8,13 @@ from simulation.state.global_state import global_state
 
 def make_uds_callback(settings, write_callback=None):
     def uds_callback(distance):
-        # Pretvaramo DUS1 u dus1 radi lakšeg pristupa u global_state
+
         device_id = settings['device'].lower() 
         print(f"[SIM] {settings['device']} distance: {distance}")
 
-        # 1. Ažuriramo prethodnu distancu (pre nego što upišemo novu)
-        global_state[f"{device_id}_prev_dist"] = global_state.get(f"{device_id}_dist", distance)
-        
-        # 2. Ažuriramo trenutnu distancu
+        global_state[f"{device_id}_prev_dist"] = global_state.get(f"{device_id}_dist", distance)        
         global_state[f"{device_id}_dist"] = distance
 
-        # Slanje eventa u bazu (za grafikon distance)
         event = SensorEvent(
             pi_id=settings["pi"], 
             device=settings["device"], 
