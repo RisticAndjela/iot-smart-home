@@ -2,6 +2,7 @@ try:
     import RPi.GPIO as GPIO
 except ModuleNotFoundError:
     import fake_rpi
+    fake_rpi.toggle_print(False)
     GPIO = fake_rpi.RPi.GPIO
 
 import time

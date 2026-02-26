@@ -4,6 +4,7 @@ try:
     import RPi.GPIO as GPIO
 except ImportError:
     import fake_rpi
+    fake_rpi.toggle_print(False)
     GPIO = fake_rpi.RPi.GPIO
 
 def run_ir_real_loop(pin, callback, stop_event):
