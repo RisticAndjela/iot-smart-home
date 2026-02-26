@@ -1,3 +1,92 @@
+<!-- <!DOCTYPE html>
+<html lang="sr">
+<head>
+    <meta charset="UTF-8">
+    <title>IoT Smart Home | Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <h1>Smart Home Control Center</h1>
+
+    <div class="tabs">
+        <button id="defaultOpen" class="tab-btn" onclick="openTab(event, 'status-tab')">Real-time Status</button>
+        <button class="tab-btn" onclick="openTab(event, 'grafana-tab')">Analytics & History</button>
+    </div>
+
+    <div id="status-tab" class="tab-content">
+        <div class="container">
+            <div class="card pi1">
+                <h2>PI1 - Entrance</h2>
+                <p>Door Sensor (DS1): <b id="val-DS1">{{ data.get('DS1', 'N/A') }}</b></p>
+                <p>Door Light (DL): <b id="val-DL">{{ data.get('DL', 'OFF') }}</b></p>
+                <p>Ultrasonic (DUS1): <b id="val-DUS1">{{ data.get('DUS1', 'N/A') }}</b> cm</p>
+                <p>Door Buzzer (DB): <b id="val-DB">{{ data.get('DB', 'OFF') }}</b></p>
+                <p>Motion (DPIR1): <b id="val-DPIR1">{{ data.get('DPIR1', 'N/A') }}</b></p>
+                <p>Membrane Switch (DMS): <b id="val-DMS">{{ data.get('DMS', 'N/A') }}</b></p>
+                <p>Web Camera (WEBC): <b>Inactive</b></p>
+            </div>
+
+            <div class="card pi2">
+                <h2>PI2 - Kitchen & Garage</h2>
+                <p>Door Sensor (DS2): <b id="val-DS2">{{ data.get('DS2', 'N/A') }}</b></p>
+                <p>Ultrasonic (DUS2): <b id="val-DUS2">{{ data.get('DUS2', 'N/A') }}</b> cm</p>
+                <p>Motion (DPIR2): <b id="val-DPIR2">{{ data.get('DPIR2', 'N/A') }}</b></p>
+                <p>Kitchen Timer (4SD): <b id="val-4SD">{{ data.get('4SD', '00:00') }}</b></p>
+                <p>Kitchen Button (BTN): <b id="val-BTN">{{ data.get('BTN', 'N/A') }}</b></p>
+                <p>Kitchen Temp (DHT3): <b id="val-DHT3">{{ data.get('DHT3', 'N/A') }}</b>°C</p>
+                <p>Gyroscope (GSG): <b id="val-GSG">{{ data.get('GSG', 'N/A') }}</b></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="grafana-tab" class="tab-content">
+        <div class="grafana-section">
+            <iframe src="http://localhost:3000/goto/dfdjxstyvtddsf?orgId=1" width="100%" height="600" frameborder="0"></iframe>
+        </div>
+    </div>
+
+    <script>
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+                tabcontent[i].classList.remove("active");
+            }
+            tablinks = document.getElementsByClassName("tab-btn");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].classList.remove("active");
+            }
+            const targetTab = document.getElementById(tabName);
+            targetTab.style.display = "block";
+            setTimeout(() => { targetTab.classList.add("active"); }, 10);
+            evt.currentTarget.classList.add("active");
+        }
+
+        function refreshData() {
+            fetch('/api/data')
+                .then(response => response.json())
+                .then(data => {
+                    for (let key in data) {
+                        let element = document.getElementById('val-' + key);
+                        if (element) {
+                            element.innerText = data[key];
+                        }
+                    }
+                })
+                .catch(err => console.log('Greška pri osvežavanju:', err));
+        }
+
+        window.onload = function() {
+            document.getElementById("defaultOpen").click();
+            setInterval(refreshData, 2000); 
+        };
+    </script>
+</body>
+</html> -->
+
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -25,6 +114,24 @@
             <div id="devicesList" class="list-group" aria-label="Devices list"></div>
           </div>
         </div>
+
+        <div class="card mt-3">
+            <div class="card-body p-2">
+                <h5 class="card-title px-2">Views</h5>
+                <div class="list-group">
+                <a href="#" class="list-group-item list-group-item-action" onclick="showWebcam(event, this)">
+                    <div class="d-flex align-items-center">
+                    <span class="me-2">📷</span> Webcam View
+                    </div>
+                </a>
+                <a href="#" class="list-group-item list-group-item-action" onclick="showGrafana(event, this)">
+                    <div class="d-flex align-items-center">
+                    <span class="me-2">📊</span> Grafana Dashboard
+                    </div>
+                </a>
+                </div>
+            </div>
+            </div>
 
         <div class="card mt-3">
           <div class="card-body">
@@ -290,6 +397,48 @@ function renderSparkline(sensorId) {
       plugins: { legend:{ display:false }, tooltip:{ enabled:false } }
     }
   });
+}
+
+function showWebcam(event, element) {
+  event.preventDefault();
+  document.querySelectorAll('.list-group-item').forEach(x => x.classList.remove('active'));
+  element.classList.add('active');
+
+  const main = document.getElementById('mainArea');
+  main.innerHTML = `
+    <div class="card bg-dark text-white">
+      <div class="card-body">
+        <h3>Live Webcam Stream</h3>
+        <hr>
+        <div class="text-center bg-black rounded p-3" style="min-height: 400px; display: flex; align-items: center; justify-content: center;">
+          <img src="/static/img/webcam_placeholder.jpg" class="img-fluid rounded" alt="Webcam Stream" 
+               onerror="this.src='https://via.placeholder.com/640x480?text=No+Camera+Signal'">
+        </div>
+        <p class="mt-3 text-muted">Striming uživo sa Raspberry Pi kamere.</p>
+      </div>
+    </div>
+  `;
+}
+
+function showGrafana(event, element) {
+  event.preventDefault();
+  document.querySelectorAll('.list-group-item').forEach(x => x.classList.remove('active'));
+  element.classList.add('active');
+
+  const main = document.getElementById('mainArea');
+  const grafanaUrl = "http://localhost:3000/d-solo/your-dashboard-id"; 
+
+  main.innerHTML = `
+    <div class="card" style="height: 85vh;">
+      <div class="card-body p-0">
+        <iframe src="http://localhost:3000" 
+                width="100%" height="100%" 
+                frameborder="0" 
+                style="border-radius: 8px;">
+        </iframe>
+      </div>
+    </div>
+  `;
 }
 
 function updateSensorValue(sensorId, value, simulated=false) {

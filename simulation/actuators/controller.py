@@ -33,7 +33,7 @@ def send_system_event(device, value, type_name, pi_id="1"):
             pi_id=pi_id,
             device=device,
             sensor_type=type_name,
-            value=value, # Ovde šaljemo ceo broj, ne samo 0 ili 1
+            value=value,
             simulated=True,
             timestamp=time.time()
         )
@@ -63,14 +63,22 @@ def run_controller(light: DoorLight, buzzer: DoorBuzzer, rgb: RGB_LED, stop_even
                 cmd = None
 
             if cmd:
-                # Tačka 4.c: Isključivanje alarma putem komande/PIN-a
                 if cmd == "pin_correct":
-                    global_state["alarm_active"] = False
-                    global_state["system_armed"] = False
-                    global_state["system_arming"] = False
-                    buzzer.off()
-                    send_actuator_event("DB", 0, "buzzer")
-                    print("[CONTROLLER] System Deactivated & Alarm OFF")
+                    is_active = global_state.get("system_armed") or global_state.get("alarm_active") or global_state.get("system_arming")
+                    
+                    if is_active:
+                        # 1. SLUČAJ: Gasi sve (DEACTIVATION)
+                        global_state["alarm_active"] = False
+                        global_state["system_armed"] = False
+                        global_state["system_arming"] = False
+                        buzzer.off()
+                        send_actuator_event("DB", 0, "buzzer")
+                        print("[CONTROLLER] System Deactivated & Alarm OFF")
+                    else:
+                        # 2. SLUČAJ: Pali sistem (ARMING - Tačka 4.a specifikacije)
+                        global_state["system_arming"] = True
+                        arming_start_time = 0 # Resetujemo tajmer
+                        print("[CONTROLLER] PIN ACCEPTED. You have 10 seconds to leave the house!")
                 
                 # logiku za ručno paljenje na 'l' i 'b'
                 elif cmd == "l":
@@ -178,13 +186,13 @@ def run_controller(light: DoorLight, buzzer: DoorBuzzer, rgb: RGB_LED, stop_even
             if current_time - last_lcd_rotation_time > 5: # Menjaj na svakih 5 sekundi
                 current_dht = dht_list[dht_index]
                 
-                # Izvlačenje podataka iz global_state (pazi na ključeve!)
-                # Pretpostavljamo da tvoji DHT simulatori pune ove ključeve
                 temp = global_state.get(f"dht{current_dht}_temp", 0)
                 hum = global_state.get(f"dht{current_dht}_hum", 0)
                 
                 # Formatiranje poruke za LCD (16 karaktera po redu max)
                 lcd_message = f"DHT{current_dht}: T:{temp}C H:{hum}%"
+                
+                global_state["lcd_message"] = lcd_message
                 
                 # Slanje na LCD (PI3)
                 send_system_event("LCD", lcd_message, "LCD", pi_id="3")

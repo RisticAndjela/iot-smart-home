@@ -23,10 +23,14 @@ def create_mqtt_client(client_id="PI1",
     final_port = int(port or os.getenv('MQTT_PORT') or 1883)
     client = mqtt.Client(client_id=client_id)
 
-    def on_connect(c, userdata, flags, rc):
+    def on_connect(client, userdata, flags, rc):        
         if rc == 0:
+            cid_str = str(client_id).lower()
             print(f"[MQTT] Connected successfully as {client_id} -> {final_host}:{final_port}")
-            c.subscribe(f"commands/{client_id.lower()}/#")
+            
+            client.subscribe(f"commands/{cid_str}/#")
+            print(f"[MQTT] Subscribed to: commands/{cid_str}/#")
+            client.subscribe("sensors/#")
         else:
             print(f"[MQTT] Connection failed with code {rc}")
 

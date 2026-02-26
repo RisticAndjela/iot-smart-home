@@ -11,7 +11,6 @@ def run_ds_loop(delay, callback, stop_event, settings):
     port = settings['pin']
     GPIO.setup(port, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     
-    # Pamtimo prethodno stanje da ne ispisujemo isto stalno
     prev_val = None 
     
     while True:

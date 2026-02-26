@@ -51,6 +51,18 @@ services:
       - GF_SECURITY_ALLOW_EMBEDDING=true
       - GF_AUTH_ANONYMOUS_ENABLED=true
 
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile_bridge # Napravi jednostavan Dockerfile za server.py
+    container_name: mqtt_bridge
+    depends_on:
+      - mosquitto
+      - influxdb
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - MQTT_HOST=mosquitto
+
 volumes:
   influxdb_data:
   grafana_data:

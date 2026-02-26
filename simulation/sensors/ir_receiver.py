@@ -1,29 +1,68 @@
 import time
-import random
+from datetime import datetime
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    import fake_rpi
+    GPIO = fake_rpi.RPi.GPIO
 
-def run_ir(settings, threads, stop_event, cmd_queue):
-    device_name = settings['device'] # "IR_RECEIVER"
-    
-    # Mapiranje IR kodova na komande koje kontroler razume
-    remote_map = {
-        "0xFF30CF": "brgb_red",
-        "0xFF18E7": "brgb_green",
-        "0xFF7A85": "brgb_blue",
-        "0xFF10EF": "brgb_off"
-    }
+def run_ir_real_loop(pin, callback, stop_event):
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(pin, GPIO.IN)
 
-    def ir_loop():
+    def getBinary():
+        num1s = 0 
+        binary = 1 
+        command = [] 
+        previousValue = 0 
+        value = GPIO.input(pin) 
+
+        while value:
+            time.sleep(0.0001)
+            value = GPIO.input(pin)
+            if stop_event.is_set(): return None
+            
+        startTime = datetime.now()
+        
         while not stop_event.is_set():
-            # Simuliramo da je neko pritisnuo dugme svakih 15 sekundi
-            if random.random() < 0.1: 
-                code = random.choice(list(remote_map.keys()))
-                cmd = remote_map[code]
-                print(f"[{device_name}] Received IR code {code} -> Sending {cmd}")
-                cmd_queue.put(cmd)
-            time.sleep(10)
+            if previousValue != value:
+                now = datetime.now()
+                pulseTime = now - startTime
+                startTime = now
+                command.append((previousValue, pulseTime.microseconds))
+                
+            if value: num1s += 1
+            else: num1s = 0
+            
+            if num1s > 10000: break
+                
+            previousValue = value
+            value = GPIO.input(pin)
+            
+        for (typ, tme) in command:
+            if typ == 1:
+                if tme > 1000:
+                    binary = binary * 10 + 1
+                else:
+                    binary *= 10
+                    
+        if len(str(binary)) > 34:
+            binary = int(str(binary)[:34])
+            
+        return binary
 
-    # Standardno pokretanje niti
-    import threading
-    t = threading.Thread(target=ir_loop, daemon=True)
-    t.start()
-    threads.append(t)
+    def convertHex(binaryValue):
+        tmpB2 = int(str(binaryValue), 2)
+        return hex(tmpB2)
+
+    while not stop_event.is_set():
+        value = GPIO.input(pin)
+        # Kada senzor padne na 0, detektovan je početak signala
+        if value == 0:
+            bin_val = getBinary()
+            if bin_val:
+                hex_val = convertHex(bin_val)
+                callback(hex_val) # Ovo šalje "0x300ff30cf" u components/ir.py
+            time.sleep(0.5) # Debounce
+        else:
+            time.sleep(0.1)
