@@ -1,48 +1,36 @@
 try:
     import RPi.GPIO as GPIO
-except ModuleNotFoundError:
+except (ImportError, ModuleNotFoundError):
     import fake_rpi
     GPIO = fake_rpi.RPi.GPIO
 
-GPIO.setmode(GPIO.BCM)
-
 class DoorLight:
-    def __init__(self, pins):
-        self.pins = pins
+    def __init__(self, pin):
+        self.pin = pin
         self.is_on = False
-        
-        for color, pin in self.pins.items():
-            GPIO.setup(pin, GPIO.OUT)
-            try:
-                GPIO.output(pin, 0) 
-            except Exception:
-                pass
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(self.pin, GPIO.OUT)
+        self.off() # Inicijalno ugasimo diodu
 
-    def on(self, color='white'): 
+    def on(self):
         self.is_on = True
-        print(f"Light ON (color: {color})")
-        
+        print(f"[HW] Light ON (pin {self.pin})")
         try:
-            if color == 'red':
-                self._set_rgb(1, 0, 0)
-            elif color == 'green':
-                self._set_rgb(0, 1, 0)
-            elif color == 'blue':
-                self._set_rgb(0, 0, 1)
-            else: # White
-                self._set_rgb(1, 1, 1)
+            GPIO.output(self.pin, GPIO.HIGH) # Može i 1
         except Exception as e:
-            print(f"Error turning on RGB: {e}")
+            print(f"GPIO Error ON: {e}")
 
     def off(self):
         self.is_on = False
-        print("Light OFF")
+        print(f"[HW] Light OFF (pin {self.pin})")
         try:
-            self._set_rgb(0, 0, 0)
-        except Exception:
-            pass
+            GPIO.output(self.pin, GPIO.LOW) # Može i 0
+        except Exception as e:
+            print(f"GPIO Error OFF: {e}")
 
-    def _set_rgb(self, r_val, g_val, b_val):
-        GPIO.output(self.pins['r'], r_val)
-        GPIO.output(self.pins['g'], g_val)
-        GPIO.output(self.pins['b'], b_val)
+    def toggle(self):
+        """Korisno za dugmad na frontendu"""
+        if self.is_on:
+            self.off()
+        else:
+            self.on()

@@ -1,16 +1,18 @@
 import threading
 import time
+import queue # Dodajemo za komunikaciju sa Flaskom
 from messaging.event_queue import event_queue
 from simulation.sensors.sensor_event import SensorEvent
 
-def run_4sd(settings, threads, stop_event):
+# Dodajemo 'command_queue' kao četvrti argument
+def run_4sd(settings, threads, stop_event, command_queue):
     device_name = settings['device']
-    pi_id = settings['pi']
+    pi_id = settings['pi'] 
     simulated = settings.get('simulated', True)
     
     display_state = {"text": "    "}
 
-    # --- 1. BRZA HARDVERSKA PETLJA (MULTIPLEKSIRANJE) ---
+    # --- 1. BRZA HARDVERSKA PETLJA (Ostaje ista) ---
     def multiplexer_loop():
         try:
             import RPi.GPIO as GPIO
@@ -19,7 +21,6 @@ def run_4sd(settings, threads, stop_event):
             GPIO = fake_rpi.RPi.GPIO
 
         GPIO.setmode(GPIO.BCM)
-        
         segments = settings.get('segments', (11,4,23,8,7,10,18,25))
         digits = settings.get('digits', (22,27,17,24))
 
@@ -42,17 +43,13 @@ def run_4sd(settings, threads, stop_event):
         try:
             while not stop_event.is_set():
                 s = display_state["text"].rjust(4)
-                
                 for digit_idx in range(4):
                     char = s[digit_idx] if digit_idx < len(s) else ' '
                     if char not in num_map: char = ' '
-                    
                     for loop in range(0,7):
                         GPIO.output(segments[loop], num_map[char][loop])
-                    
                     GPIO.output(digits[digit_idx], 0)
-                    time.sleep(0.001) # Tromost oka (1ms)
-                    
+                    time.sleep(0.001)
                     GPIO.output(digits[digit_idx], 1)
         finally:
             GPIO.cleanup()
@@ -65,30 +62,46 @@ def run_4sd(settings, threads, stop_event):
         print(f"Starting {device_name} Kitchen Timer on PI{pi_id}...")
 
         while not stop_event.is_set():
-            time.sleep(15)
-            
-            for i in range(5, -1, -1):
-                if stop_event.is_set(): break
+            try:
+                # Čekamo poruku
+                raw_msg = command_queue.get(timeout=1)
                 
-                display_str = f"{i:04d}" 
+                # Ekstrakcija broja: tražimo cifre u poruci
+                import re
+                numbers = re.findall(r'\d+', str(raw_msg))
+                if not numbers:
+                    continue
                 
-                display_state["text"] = display_str
+                initial_count = int(numbers[0])
+                print(f"[4SD] Primljen start: {initial_count}")
 
-                if simulated:
-                    print(f"[SIM] {device_name} Timer: {display_str}")
+                # ODBROJAVANJE
+                for i in range(initial_count, -1, -1):
+                    if stop_event.is_set(): break
+                    
+                    # Ažuriramo tekst za displej
+                    display_state["text"] = f"{i:04d}"
 
-                event = SensorEvent(
-                    pi_id=pi_id,
-                    device=device_name,
-                    sensor_type="actuator", 
-                    value=display_str,
-                    simulated=simulated,
-                    timestamp=time.time()
-                )
-                event_queue.put(event)
-                time.sleep(1) 
+                    if simulated:
+                        print(f"[SIM] PI{pi_id} - {device_name} Display: {display_state['text']}")
+
+                    # UPIS U BAZU (Samo ako ti kontroler već ne piše isto ovo!)
+                    event = SensorEvent(
+                        pi_id=pi_id,
+                        device=device_name,
+                        sensor_type="Kitchen_Timer", 
+                        value=i,
+                        simulated=simulated,
+                        timestamp=time.time()
+                    )
+                    event_queue.put(event)
+                    
+                    time.sleep(1) 
                 
-            display_state["text"] = "0000"
+                display_state["text"] = "0000"
+
+            except queue.Empty:
+                continue
 
     t = threading.Thread(target=timer_loop, daemon=True)
     t.start()

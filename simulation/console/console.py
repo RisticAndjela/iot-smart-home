@@ -12,10 +12,11 @@ def console_loop(stop_event, dl_actuator, db_actuator):
 
             if user_input == 'l':
                 if dl_actuator:
-                    if dl_actuator.is_on:
-                        dl_actuator.off()
-                    else:
-                        dl_actuator.on()
+                    dl_actuator.toggle()
+                    # if dl_actuator.is_on:
+                    #     dl_actuator.off()
+                    # else:
+                    #     dl_actuator.on()
                 else:
                     print("Door light not initialized.")
 

@@ -150,7 +150,13 @@
   </div>
 
 <script>
-// global guards
+
+// 1. Na vrhu kod ostalih state promenljivih dodaj ovo:
+const sensorHist = {};
+const charts = {};
+const socket = io();
+let activeDeviceId = null;
+
 window.addEventListener('unhandledrejection', function(event) {
   console.warn('Unhandled promise rejection captured:', event.reason);
 });
@@ -158,13 +164,54 @@ window.addEventListener('error', function(ev) {
   console.warn('Global error captured:', ev.error || ev.message, ev);
 });
 
-// helpers
-function el(tag, cls='', txt='') {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (txt !== undefined && txt !== null && txt !== '') e.innerText = txt;
-  return e;
+
+
+// 2. Izmeni selectDevice funkciju da zapamti ID
+async function selectDevice(deviceId) {
+  activeDeviceId = deviceId; // Zapamti koji je uređaj otvoren
+  const main = document.getElementById('mainArea');
+  
+  // Spinner prikazujemo samo prvi put, ne i pri automatskom osvežavanju
+  if (main.innerHTML.includes('alert-info') || main.innerHTML === '') {
+    main.innerHTML = '<div class="spinner-border text-info" role="status"></div> Loading...';
+  }
+
+  try {
+    const res = await fetch(`/api/devices/${deviceId}/details`);
+    if (!res.ok) throw new Error('Device details fetch failed');
+    const data = await res.json();
+    
+    // Ako korisnik nije u međuvremenu prešao na drugi uređaj ili tab (Webcam/Grafana)
+    if (activeDeviceId === deviceId) {
+       renderDeviceDetails(data);
+    }
+  } catch (err) {
+    console.error(err);
+  }
 }
+
+// 3. Dodaj funkciju koja će se pokretati svakih 10 sekundi
+async function periodicRefresh() {
+  if (activeDeviceId) {
+    console.log("Auto-refreshing device:", activeDeviceId);
+    // Pozivamo istu funkciju, ali renderDeviceDetails će se pobrinuti za grafikone
+    await selectDevice(activeDeviceId);
+  }
+  // Takođe možemo osvežiti i listu uređaja sa leve strane ako se nešto promenilo
+  fetchDevices();
+}
+
+// 4. Na samom kraju skripte (ispod fetchDevices() poziva) pokreni tajmer
+fetchDevices();
+setInterval(periodicRefresh, 10000); // 10000ms = 10 sekundi
+
+function el(tag, cls='', txt='') {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (txt !== undefined && txt !== null && txt !== '') e.innerText = txt;
+    return e;
+}
+
 function log(msg) {
   const logsEl = document.getElementById('logs');
   const at = new Date().toLocaleTimeString();
@@ -172,11 +219,6 @@ function log(msg) {
   row.innerText = `[${at}] ${msg}`;
   logsEl.prepend(row);
 }
-
-// state
-const sensorHist = {};
-const charts = {};
-const socket = io();
 
 // fetch devices
 async function fetchDevices() {
@@ -213,146 +255,110 @@ function renderDevices(devices) {
   });
 }
 
-async function selectDevice(deviceId) {
-  const main = document.getElementById('mainArea');
-  main.innerHTML = '<div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div> Loading...';
-  try {
-    const res = await fetch(`/api/devices/${deviceId}/details`);
-    if (!res.ok) throw new Error('Device details fetch failed');
-    const data = await res.json();
-    renderDeviceDetails(data);
-  } catch (err) {
-    main.innerHTML = `<div class="alert alert-danger">Failed to load device: ${err.message}</div>`;
-    console.error(err);
-  }
-}
-
 function renderDeviceDetails(data) {
   const main = document.getElementById('mainArea');
   main.innerHTML = '';
+
+  // 1. Header
   const header = el('div', 'd-flex mb-3 align-items-center');
-  header.appendChild(el('h3','me-3', `${data.name} (PI${data.pi})`));
-  header.appendChild(el('small','text-muted', data.description || ''));
+  header.appendChild(el('h3', 'me-3', `${data.name} (PI${data.pi})`));
+  header.appendChild(el('small', 'text-muted', data.description || ''));
   main.appendChild(header);
 
-  // sensors
-  main.appendChild(el('h5','mt-3','Sensors'));
-  const sensorsRow = el('div','row g-3');
-  data.sensors.forEach(s => {
-    const col = el('div','col-md-4');
-    const card = el('div','card device-card p-2');
-    const body = el('div','card-body p-2');
-    body.appendChild(el('h6','card-title mb-1', `${s.name} (${s.code})`));
-    const meta = el('div','mb-1 sensor-meta');
-    meta.appendChild(el('span','badge bg-secondary sensor-tag', s.type || 'sensor'));
-    if (s.simulated) meta.appendChild(el('span','badge bg-warning ms-1 sensor-tag','simulated'));
-    body.appendChild(meta);
+  // --- SEKCIJA: SENZORI ---
+  main.appendChild(el('h5', 'mt-3', 'Sensors'));
+  const sensorsRow = el('div', 'row g-3');
 
-    const valueEl = el('div','fs-4 fw-bold mb-1','—');
+  data.sensors.forEach(s => {
+    if (s.history && Array.isArray(s.history) && s.history.length > 0) {
+      sensorHist[s.id] = s.history.map(val => ({ ts: Date.now(), value: Number(val) }));
+    } else if (!sensorHist[s.id]) {
+      sensorHist[s.id] = [];
+    }
+
+    const col = el('div', 'col-md-4');
+    const card = el('div', 'card device-card p-2 shadow-sm');
+    const body = el('div', 'card-body p-2');
+    
+    body.appendChild(el('h6', 'card-title mb-1', `${s.name} (${s.code})`));
+    
+    const lastVal = (s.history && s.history.length > 0) ? s.history[s.history.length - 1] : '—';
+    const valueEl = el('div', 'fs-4 fw-bold mb-1', lastVal);
     valueEl.id = `value-${s.id}`;
     body.appendChild(valueEl);
 
-    const canvas = el('canvas','sparkline');
+    const canvas = el('canvas', 'sparkline');
     canvas.id = `chart-${s.id}`;
     body.appendChild(canvas);
 
-    // controls for manual activation
-    const ctrl = el('div','mt-2');
-    const stype = (s.type || '').toLowerCase();
-    if (['binary','door','button','membrane','ir','motion'].includes(stype)) {
-      const btn = el('button','btn btn-sm btn-primary','Trigger');
-      btn.onclick = () => sendSensorCommand(s.id, {command: 'trigger'});
+    // Kontrole senzora
+    const ctrl = el('div', 'mt-2 d-flex gap-1 flex-wrap');
+    if (['binary', 'door', 'button', 'motion'].includes((s.type || '').toLowerCase())) {
+      const btn = el('button', 'btn btn-sm btn-primary', 'Trigger');
+      btn.onclick = () => sendSensorCommand(s.id, { command: 'trigger' });
       ctrl.appendChild(btn);
-      const tog = el('button','btn btn-sm btn-secondary ms-2','Toggle');
-      tog.onclick = () => sendSensorCommand(s.id, {command: 'toggle'});
-      ctrl.appendChild(tog);
-    } else if (['distance','ultrasonic'].includes(stype)) {
-      const input = el('input','form-control form-control-sm d-inline-block me-2');
-      input.type = 'number'; input.placeholder = 'cm'; input.style.width = '110px';
-      const btn = el('button','btn btn-sm btn-primary','Set');
+    } else if (['distance', 'ultrasonic'].includes((s.type || '').toLowerCase())) {
+      const input = el('input', 'form-control form-control-sm d-inline-block');
+      input.type = 'number'; input.placeholder = 'cm'; input.style.width = '70px';
+      const btn = el('button', 'btn btn-sm btn-primary', 'Set');
       btn.onclick = () => {
         const v = parseFloat(input.value);
-        if (isNaN(v)) { log('Unesi broj za distance'); return; }
-        sendSensorCommand(s.id, {command:'set', value: v});
+        if (!isNaN(v)) sendSensorCommand(s.id, { command: 'set', value: v });
       };
       ctrl.appendChild(input); ctrl.appendChild(btn);
-    } else if (stype === 't/h' || stype === 'dht') {
-      const tinput = el('input','form-control form-control-sm d-inline-block me-2');
-      tinput.type = 'number'; tinput.placeholder = 'temp';
-      const hinput = el('input','form-control form-control-sm d-inline-block me-2');
-      hinput.type = 'number'; hinput.placeholder = 'hum';
-      const btn = el('button','btn btn-sm btn-primary','Set T/H');
-      btn.onclick = () => {
-        const t = parseFloat(tinput.value);
-        const h = parseFloat(hinput.value);
-        const payloadVal = {};
-        if (!isNaN(t)) payloadVal.temperature = t;
-        if (!isNaN(h)) payloadVal.humidity = h;
-        if (Object.keys(payloadVal).length === 0) { log('Unesi temp ili hum'); return; }
-        sendSensorCommand(s.id, {command:'set', value: payloadVal});
-      };
-      ctrl.appendChild(tinput); ctrl.appendChild(hinput); ctrl.appendChild(btn);
-      const rnd = el('button','btn btn-sm btn-outline-secondary ms-2','Random');
-      rnd.onclick = () => {
-        const rt = (18 + Math.random()*10).toFixed(1);
-        const rh = (30 + Math.random()*40).toFixed(1);
-        sendSensorCommand(s.id, {command:'set', value: {temperature: Number(rt), humidity: Number(rh)}});
-      };
-      ctrl.appendChild(rnd);
-    } else if (['display','text'].includes(stype)) {
-      const txt = el('input','form-control form-control-sm d-inline-block me-2');
-      txt.type = 'text'; txt.placeholder = 'text';
-      const btn = el('button','btn btn-sm btn-primary','Send');
-      btn.onclick = () => {
-        if (!txt.value) { log('Unesi tekst'); return; }
-        sendSensorCommand(s.id, {command:'set', value: String(txt.value)});
-      };
-      ctrl.appendChild(txt); ctrl.appendChild(btn);
     }
+    
     body.appendChild(ctrl);
-
     card.appendChild(body);
     col.appendChild(card);
     sensorsRow.appendChild(col);
-
-    sensorHist[s.id] = sensorHist[s.id] || [];
-    renderSparkline(s.id);
+    setTimeout(() => renderSparkline(s.id), 60);
   });
   main.appendChild(sensorsRow);
 
-  // actuators
-  main.appendChild(el('h5','mt-4','Actuators'));
-  const actuatorsRow = el('div','row g-3 mt-3');
+  // --- SEKCIJA: AKTUATORI ---
+  main.appendChild(el('h5', 'mt-4', 'Actuators'));
+  const actuatorsRow = el('div', 'row g-3 mt-1');
+
   data.actuators.forEach(a => {
-    const col = el('div','col-md-4');
-    const card = el('div','card p-2');
-    const body = el('div','card-body p-2');
-    body.appendChild(el('h6','card-title mb-2', `${a.name} (${a.code})`));
-    const stateEl = el('div','mb-2', `State: `);
-    const stateSpan = el('span','fw-bold', a.state ? a.state : 'unknown');
+    const col = el('div', 'col-md-4');
+    const card = el('div', 'card p-2 shadow-sm');
+    const body = el('div', 'card-body p-2');
+    
+    body.appendChild(el('h6', 'card-title mb-2', `${a.name} (${a.code})`));
+    
+    const stateEl = el('div', 'mb-2', `Display: `);
+    const stateColor = (parseInt(a.state) > 0) ? 'text-success' : 'text-danger';
+    const stateSpan = el('span', `fw-bold ${stateColor}`, (a.state || '0000'));
     stateSpan.id = `actstate-${a.id}`;
     stateEl.appendChild(stateSpan);
     body.appendChild(stateEl);
 
-    const controls = el('div','d-flex gap-2');
-    if (a.kind === 'binary') {
-      const onBtn = el('button','btn btn-sm btn-success','ON');
-      const offBtn = el('button','btn btn-sm btn-danger','OFF');
-      onBtn.onclick = () => sendActuatorCommand(a.id, {command:'set', value:'on'});
-      offBtn.onclick = () => sendActuatorCommand(a.id, {command:'set', value:'off'});
+    const controls = el('div', 'd-flex gap-2');
+    
+    // LOGIKA ZA 4SD TAJMER
+    if (a.kind === 'text' || a.code.includes('4SD')) {
+      const inp = el('input', 'form-control form-control-sm');
+      inp.type = 'number';
+      inp.placeholder = 'Start value';
+      
+      const btn = el('button', 'btn btn-sm btn-primary', 'Start Timer');
+      btn.onclick = () => {
+        if (!inp.value) return;
+        sendActuatorCommand(a.id, { value: inp.value, type: '4sd' });
+      };
+      controls.appendChild(inp); 
+      controls.appendChild(btn);
+    } 
+    // Ostali aktuatori
+    else if (a.kind === 'binary') {
+      const onBtn = el('button', 'btn btn-sm btn-success', 'ON');
+      const offBtn = el('button', 'btn btn-sm btn-danger', 'OFF');
+      onBtn.onclick = () => sendActuatorCommand(a.id, { value: 'on' });
+      offBtn.onclick = () => sendActuatorCommand(a.id, { value: 'off' });
       controls.appendChild(onBtn); controls.appendChild(offBtn);
-    } else if (a.kind === 'rgb') {
-      const color = el('input'); color.type = 'color'; color.value = a.state || '#ffffff';
-      color.onchange = () => sendActuatorCommand(a.id, {command:'set', value: color.value});
-      controls.appendChild(color);
-    } else if (a.kind === 'text') {
-      const inp = el('input','form-control form-control-sm'); inp.placeholder='text';
-      const btn = el('button','btn btn-sm btn-primary','Send');
-      btn.onclick = ()=> sendActuatorCommand(a.id, {command:'set', value: inp.value});
-      controls.appendChild(inp); controls.appendChild(btn);
-    } else {
-      controls.appendChild(el('div','text-muted','No controls'));
     }
+
     body.appendChild(controls);
     card.appendChild(body);
     col.appendChild(card);
@@ -383,18 +389,51 @@ function getYBoundsFromData(values) {
 function renderSparkline(sensorId) {
   const canvas = document.getElementById(`chart-${sensorId}`);
   if (!canvas) return;
+
   const dataVals = (sensorHist[sensorId] || []).slice(-25).map(p => p.value);
   const bounds = getYBoundsFromData(dataVals);
+
   if (charts[sensorId]) {
     try { charts[sensorId].destroy(); } catch(e) {}
   }
+
   charts[sensorId] = new Chart(canvas, {
     type: 'line',
-    data: { labels: dataVals.map((_,i)=>i), datasets: [{ data: dataVals, borderColor: getComputedStyle(document.documentElement).getPropertyValue('--accent-blue') || '#00d2ff', borderWidth:1, pointRadius:0, tension:0.35 }]},
+    data: {
+      labels: dataVals.map((_, i) => i),
+      datasets: [{
+        data: dataVals,
+        // Koristimo direktnu boju da izbegnemo probleme sa CSS varijablama
+        borderColor: '#00d2ff', 
+        backgroundColor: 'rgba(0, 210, 255, 0.1)', // Blaga senka ispod linije
+        borderWidth: 3, // Podebljana linija
+        fill: true,
+        pointRadius: 0,
+        tension: 0.4
+      }]
+    },
     options: {
-      animation: false, responsive: true, maintainAspectRatio: false,
-      scales: { x:{ display:false }, y:{ display:true, min: bounds.min, max: bounds.max, ticks:{ maxTicksLimit:3, color:'rgba(255,255,255,0.6)'} } },
-      plugins: { legend:{ display:false }, tooltip:{ enabled:false } }
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display: false },
+        y: { 
+          display: true, 
+          min: bounds.min, 
+          max: bounds.max,
+          grid: { color: 'rgba(255, 255, 255, 0.05)' }, // Suptilne mrežne linije
+          ticks: { 
+            maxTicksLimit: 3, 
+            color: 'rgba(255, 255, 255, 0.5)',
+            font: { size: 10 }
+          } 
+        }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false }
+      }
     }
   });
 }
@@ -421,51 +460,74 @@ function showWebcam(event, element) {
 }
 
 function showGrafana(event, element) {
-  event.preventDefault();
-  document.querySelectorAll('.list-group-item').forEach(x => x.classList.remove('active'));
-  element.classList.add('active');
+    event.preventDefault();
+    document.querySelectorAll('.list-group-item').forEach(x => x.classList.remove('active'));
+    element.classList.add('active');
 
-  const main = document.getElementById('mainArea');
-  const grafanaUrl = "http://localhost:3000/d-solo/your-dashboard-id"; 
+    const main = document.getElementById('mainArea');
+    
+    // Savet: Dodaj &kiosk na kraj URL-a da sakriješ Grafana meni
+    const grafanaUrl = "http://localhost:3000/dashboard/snapshot/IAkV8sRPOd3XpSzei7U9U68DbRUl1Ued"; 
 
-  main.innerHTML = `
-    <div class="card" style="height: 85vh;">
-      <div class="card-body p-0">
-        <iframe src="http://localhost:3000" 
-                width="100%" height="100%" 
-                frameborder="0" 
-                style="border-radius: 8px;">
-        </iframe>
-      </div>
-    </div>
-  `;
+    main.innerHTML = `
+        <div class="card shadow-sm" style="height: 85vh;">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Analytics & History</h5>
+                <button class="btn btn-sm btn-outline-secondary" onclick="location.reload()">Refresh All</button>
+            </div>
+            <div class="card-body p-0">
+                <iframe src="${grafanaUrl}" 
+                        width="100%" height="100%" 
+                        frameborder="0" 
+                        style="border-radius: 0 0 8px 8px;">
+                </iframe>
+            </div>
+        </div>
+    `;
 }
 
-function updateSensorValue(sensorId, value, simulated=false) {
+function updateSensorValue(sensorId, value, simulated = false) {
   const vEl = document.getElementById(`value-${sensorId}`);
   let display = value;
+  let numericValue = 0;
+
+  // Obrada kompleksnih objekata (DHT)
   if (value && typeof value === 'object') {
     const parts = [];
     if (value.temperature !== undefined) parts.push(`${value.temperature}°C`);
     if (value.humidity !== undefined) parts.push(`${value.humidity}%`);
     display = parts.join(' / ');
-  } else if (!isNaN(Number(value))) {
-    display = Number(value);
+    numericValue = value.temperature !== undefined ? Number(value.temperature) : Number(value.humidity);
+  } 
+  // Obrada logičkih vrednosti (On/Off -> 1/0)
+  else if (typeof value === 'string') {
+    const vLower = value.toLowerCase();
+    if (vLower === 'on' || vLower === 'true' || vLower === 'open') numericValue = 1;
+    else if (vLower === 'off' || vLower === 'false' || vLower === 'closed') numericValue = 0;
+    else numericValue = Number(value);
+  } 
+  else {
+    numericValue = Number(value);
   }
+
   if (vEl) vEl.innerText = display + (simulated ? ' Ⓢ' : '');
 
   sensorHist[sensorId] = sensorHist[sensorId] || [];
-  const histValue = (typeof value === 'object') ? (value.temperature !== undefined ? Number(value.temperature) : (value.humidity !== undefined ? Number(value.humidity) : 0)) : Number(value);
-  sensorHist[sensorId].push({ ts: Date.now(), value: (Number.isFinite(histValue) ? histValue : 0), meta: value, simulated });
+  sensorHist[sensorId].push({ 
+    ts: Date.now(), 
+    value: isNaN(numericValue) ? 0 : numericValue, 
+    simulated 
+  });
 
-  if (sensorHist[sensorId].length > 200) sensorHist[sensorId].shift();
+  if (sensorHist[sensorId].length > 100) sensorHist[sensorId].shift();
 
+  // Osveži grafik
   const chart = charts[sensorId];
-  const numericLastN = sensorHist[sensorId].slice(-25).map(p => p.value);
   if (chart) {
-    chart.data.labels = numericLastN.map((_,i)=>i);
-    chart.data.datasets[0].data = numericLastN;
-    const bounds = getYBoundsFromData(numericLastN);
+    const lastN = sensorHist[sensorId].slice(-25).map(p => p.value);
+    chart.data.labels = lastN.map((_, i) => i);
+    chart.data.datasets[0].data = lastN;
+    const bounds = getYBoundsFromData(lastN);
     chart.options.scales.y.min = bounds.min;
     chart.options.scales.y.max = bounds.max;
     chart.update('none');

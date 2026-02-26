@@ -43,7 +43,8 @@ from simulation.console.console import console_loop
 from simulation.console.command_bus import command_loop
 from simulation.actuators.controller import get_cmd_queue
 
-from database.sensor_service import write_event_to_influx
+from queue import Queue
+four_sd_queue = Queue()
 
 def closing_main(stop_event, controller_thread, command_thread, threads):
     print("Stopping all threads... ")
@@ -91,6 +92,13 @@ def on_message_received(client, userdata, msg):
             if color:
                 get_cmd_queue().put(f"brgb_{color.lower()}")
                 print(f"[MQTT] Komanda prosleđena kontroleru: brgb_{color}")
+
+        if "4sd" in topic:
+            val = payload.get("value")
+            if val:
+                # Šaljemo direktno u njegov queue
+                four_sd_queue.put(str(val)) 
+                print(f"[MQTT] Poslato direktno u 4SD queue: {val}")
                     
     except Exception as e:
         print(f"Error handling MQTT message: {e}")
@@ -146,13 +154,15 @@ if __name__ == "__main__":
                 if "DHT2" in sensors: run_dht(sensors['DHT2'], threads, stop_event)
                 if "IR" in sensors: run_ir(sensors['IR'], threads, stop_event)
                 if "DPIR3" in sensors: run_pir(sensors['DPIR3'], threads, stop_event)
-            # --- AKTUATORI ---
+
             if 'DL' in actuators:
-                pins_config = actuators['DL'].get('pins')
-                if pins_config:
-                    dl = DoorLight(pins=pins_config)
-                else:
-                    dl = DoorLight(pins={'r': actuators['DL']['pin'], 'g': 0, 'b': 0})
+                # Uzimamo samo taj jedan pin koji si definisala
+                dl_pin = actuators['DL'].get('pin')
+                
+                # Inicijalizujemo DoorLight samo sa jednim pinom
+                # (Pod uslovom da si u dl1.py klasi tako podesila __init__)
+                dl = DoorLight(pin=dl_pin) 
+                print(f"Door Light (Single LED) initialized on pin {dl_pin}")
             if 'DB' in actuators:
                 db = DoorBuzzer(pin=actuators['DB']['pin'])
 
@@ -165,7 +175,9 @@ if __name__ == "__main__":
                 print(f"LCD initialized on PI3")
 
             if pi_id == "PI2" and '4SD' in actuators:
-                run_4sd(actuators['4SD'], threads, stop_event)
+                # DODAJEMO get_cmd_queue() ovde:
+                run_4sd(actuators['4SD'], threads, stop_event, four_sd_queue)
+                print(f"4SD Display initialized on PI2")
 
         # Pokreni kontroler samo JEDNOM ako postoji bilo koji od aktuatora
         if dl or db or brgb:

@@ -62,6 +62,7 @@ def run_ir_real_loop(pin, callback, stop_event):
             bin_val = getBinary()
             if bin_val:
                 hex_val = convertHex(bin_val)
+                print(f"DETEKTOVAN KOD: {hex_val}")
                 callback(hex_val) # Ovo šalje "0x300ff30cf" u components/ir.py
             time.sleep(0.5) # Debounce
         else:

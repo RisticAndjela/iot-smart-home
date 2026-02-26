@@ -43,185 +43,201 @@ def send_system_event(device, value, type_name, pi_id="1"):
 
 def run_controller(light: DoorLight, buzzer: DoorBuzzer, rgb: RGB_LED, stop_event):
     def control_loop():
-        # Lokalni tajmeri i pomoćne varijable
-        last_light_state = False
-        arming_start_time = 0
-        correct_pin = "1234" 
-        dpir1_counted = False
+        # --- 1. INICIJALIZACIJA STANJA ---
+        # Sve varijable koje menjamo unutar petlje moraju biti u ovom rečniku
+        state = {
+            "timer_active": False,
+            "timer_value": 0,
+            "last_timer_update": 0,
+            "last_light_state": False,
+            "last_lcd_rotation_time": 0,
+            "dht_index": 0,
+            "dht_list": ["1", "2", "3"],
+            "arming_start_time": 0,
+            "dpir1_counted": False,
+            "dpir2_counted": False
+        }
 
-        last_lcd_rotation_time = 0
-        dht_index = 0 # 0=DHT1, 1=DHT2, 2=DHT3
-        dht_list = ["1", "2", "3"]
+        print("[CONTROLLER] Control loop started successfully with state management.")
+
+        
 
         while not stop_event.is_set():
             current_time = time.time()
 
-            # --- OBRADA KOMANDI (Sa tastature ili Weba) ---
+            # --- OBRADA KOMANDI IZ QUEUE ---
             try:
                 cmd = _cmd_queue.get_nowait()
+                
+                # Provera za 4SD komandu (npr. "4sd_start_10")
+                if cmd and cmd.startswith("4sd_start_"):
+                    parts = cmd.split("_")
+                    if len(parts) > 2:
+                        state["timer_value"] = int(parts[2])
+                        state["timer_active"] = True
+                        state["last_timer_update"] = current_time
+                        print(f"[CONTROLLER] Timer started at: {state['timer_value']}")
+                
+                # Podrška za direktan unos broja sa Dashboarda (isdigit)
+                elif cmd and cmd.isdigit():
+                    state["timer_value"] = int(cmd)
+                    state["timer_active"] = True
+                    state["last_timer_update"] = current_time
+                    print(f"[CONTROLLER] Dashboard Timer started: {state['timer_value']}")
+
             except queue.Empty:
                 cmd = None
+            except Exception as e:
+                print(f"[CONTROLLER] Command parse error: {e}")
+                cmd = None
 
+            # --- LOGIKA ODBROJAVANJA (4SD) ---
+            if state["timer_active"]:
+                if current_time - state["last_timer_update"] >= 1.0:
+                    state["timer_value"] -= 1
+                    state["last_timer_update"] = current_time
+                    
+                    # PROMENA: Treći argument (type_name) mora biti Kitchen_Timer
+                    send_system_event("4SD", state["timer_value"], "Kitchen_Timer", pi_id="2")
+                    
+                    global_state["4sd_value"] = state["timer_value"]
+                    
+                    if state["timer_value"] <= 0:
+                        state["timer_active"] = False
+                        print("[CONTROLLER] Timer reached zero!")
+
+            # --- OBRADA OSTALIH KOMANDI (PIN, Svetlo, RGB) ---
             if cmd:
                 if cmd == "pin_correct":
                     is_active = global_state.get("system_armed") or global_state.get("alarm_active") or global_state.get("system_arming")
                     
                     if is_active:
-                        # 1. SLUČAJ: Gasi sve (DEACTIVATION)
                         global_state["alarm_active"] = False
                         global_state["system_armed"] = False
                         global_state["system_arming"] = False
                         buzzer.off()
-                        send_actuator_event("DB", 0, "buzzer")
+                        send_actuator_event("DB", False, "buzzer")
                         print("[CONTROLLER] System Deactivated & Alarm OFF")
                     else:
-                        # 2. SLUČAJ: Pali sistem (ARMING - Tačka 4.a specifikacije)
                         global_state["system_arming"] = True
-                        arming_start_time = 0 # Resetujemo tajmer
-                        print("[CONTROLLER] PIN ACCEPTED. You have 10 seconds to leave the house!")
+                        state["arming_start_time"] = 0 
+                        print("[CONTROLLER] PIN ACCEPTED. Arming in 10s...")
                 
-                # logiku za ručno paljenje na 'l' i 'b'
                 elif cmd == "l":
-                    new_state = not last_light_state
-                    if new_state: light.on()
-                    else: light.off()
-                    send_actuator_event("DL", new_state, "light")
-                    last_light_state = new_state
+                    state["last_light_state"] = not state["last_light_state"]
+                    if state["last_light_state"]:
+                        light.on()
+                    else:
+                        light.off()
+                    send_actuator_event("DL", state["last_light_state"], "light")
 
-                elif cmd == "b" and buzzer: 
+                elif cmd == "b":
                     buzzer.on()
-                    send_actuator_event("DB", 1, "buzzer")
+                    send_actuator_event("DB", True, "buzzer")
 
-            # --- TAČKA 1: DPIR1 i DL1 na 10 sekundi ---
+                elif cmd.startswith("brgb_"):
+                    color = cmd.split("_")[1].upper()
+                    try:
+                        if color == "RED": rgb.set_color(1, 0, 0)
+                        elif color == "GREEN": rgb.set_color(0, 1, 0)
+                        elif color == "BLUE": rgb.set_color(0, 0, 1)
+                        elif color == "OFF": rgb.turn_off()
+                        send_system_event("BRGB", color, "ColorChange", pi_id="3")
+                    except Exception as e:
+                        print(f"[BRGB ERROR] {e}")
+
+            # --- TAČKA 1: DPIR1 i DL1 Automatika (10 sekundi) ---
             if global_state.get("motion_dpir1", False):
                 global_state["last_dpir1_time"] = current_time
-                if not last_light_state:
+                if not state["last_light_state"]:
                     light.on()
-                    send_actuator_event("DL", 1, "light")
-                    last_light_state = True
+                    send_actuator_event("DL", True, "light")
+                    state["last_light_state"] = True
 
-            if last_light_state and (current_time - global_state["last_dpir1_time"] > 10):
+            if state["last_light_state"] and (current_time - global_state.get("last_dpir1_time", 0) > 10):
                 light.off()
-                send_actuator_event("DL", 0, "light")
-                last_light_state = False
+                send_actuator_event("DL", False, "light")
+                state["last_light_state"] = False
 
-            # --- TAČKA 2: Brojanje osoba (DPIR1 + DUS1 na PI1) ---
-            motion_d1 = global_state.get("motion_dpir1", False)
-            if motion_d1:
+            # --- TAČKA 2: Brojanje osoba (DPIR + DUS) ---
+            # PI1
+            if global_state.get("motion_dpir1", False):
                 dist1 = global_state.get("dus1_dist", 0)
                 prev1 = global_state.get("dus1_prev_dist", 0)
-                
-                # Proveravamo da distance nisu 0 (početno stanje) i dodajemo mali buffer od 2cm
-                if not dpir1_counted and dist1 > 0 and prev1 > 0:
-                    if dist1 < (prev1 - 2): # Ulazak
+                if not state["dpir1_counted"] and dist1 > 0 and prev1 > 0:
+                    if dist1 < (prev1 - 2):
                         global_state["people_count"] += 1
-                        dpir1_counted = True
+                        state["dpir1_counted"] = True
                         send_system_event("SYSTEM", global_state["people_count"], "PeopleCount")
-                        print(f"[LOG] PI1 Entry: People count: {global_state['people_count']}")
-                    elif dist1 > (prev1 + 2): # Izlazak
+                    elif dist1 > (prev1 + 2):
                         global_state["people_count"] = max(0, global_state["people_count"] - 1)
-                        dpir1_counted = True
+                        state["dpir1_counted"] = True
                         send_system_event("SYSTEM", global_state["people_count"], "PeopleCount")
-                        print(f"[LOG] PI1 Exit: People count: {global_state['people_count']}")
             else:
-                dpir1_counted = False
+                state["dpir1_counted"] = False
 
-            # --- TAČKA 2a: Brojanje osoba (DPIR2 + DUS2 na PI2) ---
-            motion_d2 = global_state.get("motion_dpir2", False)
-            if motion_d2:
+            # PI2
+            if global_state.get("motion_dpir2", False):
                 dist2 = global_state.get("dus2_dist", 0)
                 prev2 = global_state.get("dus2_prev_dist", 0)
-                
-                if not dpir2_counted and dist2 > 0 and prev2 > 0:
-                    if dist2 < (prev2 - 2): # Ulazak
+                if not state["dpir2_counted"] and dist2 > 0 and prev2 > 0:
+                    if dist2 < (prev2 - 2):
                         global_state["people_count"] += 1
-                        dpir2_counted = True
+                        state["dpir2_counted"] = True
                         send_system_event("SYSTEM", global_state["people_count"], "PeopleCount")
-                        print(f"[LOG] PI2 Entry: People count: {global_state['people_count']}")
-                    elif dist2 > (prev2 + 2): # Izlazak
+                    elif dist2 > (prev2 + 2):
                         global_state["people_count"] = max(0, global_state["people_count"] - 1)
-                        dpir2_counted = True
+                        state["dpir2_counted"] = True
                         send_system_event("SYSTEM", global_state["people_count"], "PeopleCount")
-                        print(f"[LOG] PI2 Exit: People count: {global_state['people_count']}")
             else:
-                dpir2_counted = False
+                state["dpir2_counted"] = False
 
             # --- TAČKA 3: Zaboravljena vrata (5 sekundi) ---
-            if global_state["door_open"]:
-                if global_state["ds1_open_time"] == 0:
+            if global_state.get("door_open", False):
+                if global_state.get("ds1_open_time", 0) == 0:
                     global_state["ds1_open_time"] = current_time
                 elif current_time - global_state["ds1_open_time"] > 5:
                     trigger_alarm()
             else:
                 global_state["ds1_open_time"] = 0
 
-            # --- TAČKA 4: Sigurnosni Alarm (DMS PIN) ---
-            if global_state["system_arming"]:
-                if arming_start_time == 0:
-                    arming_start_time = current_time
-                elif current_time - arming_start_time > 10:
+            # --- TAČKA 4: Sigurnosni Alarm (Arming) ---
+            if global_state.get("system_arming", False):
+                if state["arming_start_time"] == 0:
+                    state["arming_start_time"] = current_time
+                elif current_time - state["arming_start_time"] > 10:
                     global_state["system_armed"] = True
                     global_state["system_arming"] = False
-                    arming_start_time = 0
+                    state["arming_start_time"] = 0
                     print("[CONTROLLER] System ARMED")
 
-            # Ako je sistem aktivan i vrata se otvore (4.b)
-            if global_state["system_armed"] and global_state["door_open"]:
+            if global_state.get("system_armed") and global_state.get("door_open"):
                 trigger_alarm()
 
-            # --- TAČKA 5: Prazna kuća (People Count == 0) ---
-            if global_state["people_count"] == 0 and global_state["motion"]:
+            # --- TAČKA 5 & 6: Prazna kuća i GSG ---
+            if global_state.get("people_count") == 0 and global_state.get("motion"):
                 trigger_alarm()
-
-            # --- TAČKA 6: GSG Pomeraj ikone ---
-            if global_state.get("significant_motion_gsg", False):
+            if global_state.get("significant_motion_gsg"):
                 trigger_alarm()
 
             # --- FINALNA AKTIVACIJA BUZZERA ---
-            if global_state["alarm_active"]:
+            if global_state.get("alarm_active"):
                 buzzer.on()
-                # Ovdje bi mogla dodati slanje eventa u bazu samo jednom pri promjeni
-            
-            # --- LOGIKA ZA LCD ROTACIJU (Tačka: DHT 1-3 Smenjivanje) ---
-            if current_time - last_lcd_rotation_time > 5: # Menjaj na svakih 5 sekundi
-                current_dht = dht_list[dht_index]
-                
-                temp = global_state.get(f"dht{current_dht}_temp", 0)
-                hum = global_state.get(f"dht{current_dht}_hum", 0)
-                
-                # Formatiranje poruke za LCD (16 karaktera po redu max)
-                lcd_message = f"DHT{current_dht}: T:{temp}C H:{hum}%"
-                
-                global_state["lcd_message"] = lcd_message
-                
-                # Slanje na LCD (PI3)
-                send_system_event("LCD", lcd_message, "LCD", pi_id="3")
-                print(f"[LCD ROTATION] Displaying: {lcd_message}")
-                
-                # Pomeri indeks na sledeći DHT
-                dht_index = (dht_index + 1) % len(dht_list)
-                last_lcd_rotation_time = current_time
 
-            # controller.py - unutar while petlje
-            if cmd and cmd.startswith("brgb_"):
-                color = cmd.split("_")[1].upper()
+            # --- LOGIKA ZA LCD ROTACIJU (Smenjivanje DHT) ---
+            if current_time - state["last_lcd_rotation_time"] > 5:
+                curr_dht = state["dht_list"][state["dht_index"]]
+                temp = global_state.get(f"dht{curr_dht}_temp", 0)
+                hum = global_state.get(f"dht{curr_dht}_hum", 0)
                 
-                try:
-                    # Koristi 'rgb' jer je tako nazvan argument u run_controller
-                    if color == "RED": rgb.set_color(1, 0, 0)
-                    elif color == "GREEN": rgb.set_color(0, 1, 0)
-                    elif color == "BLUE": rgb.set_color(0, 0, 1)
-                    elif color == "OFF": rgb.turn_off()
-                    
-                    # OVO JE JEDINO MESTO GDE SE PIŠE U BAZU
-                    send_system_event("BRGB", color, "ColorChange", pi_id="3")
-                    print(f"[CONTROLLER] Hardver osvežen i baza upisana: {color}")
-                except Exception as e:
-                    print(f"[ERROR] Problem u kontroleru sa BRGB: {e}")
-
+                lcd_msg = f"DHT{curr_dht}: T:{temp}C H:{hum}%"
+                global_state["lcd_message"] = lcd_msg
+                send_system_event("LCD", lcd_msg, "LCD", pi_id="3")
+                
+                state["dht_index"] = (state["dht_index"] + 1) % len(state["dht_list"])
+                state["last_lcd_rotation_time"] = current_time
 
             time.sleep(0.2)
-
     def trigger_alarm():
         if not global_state["alarm_active"]:
             global_state["alarm_active"] = True
