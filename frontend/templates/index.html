@@ -92,6 +92,7 @@
               <button class="btn btn-sm btn-outline-danger" data-cmd="alarm_on">alarm_on</button>
               <button class="btn btn-sm btn-outline-secondary" data-cmd="alarm_off">alarm_off</button>
               <button class="btn btn-sm btn-outline-info" data-cmd="people_reset">people_reset</button>
+              <button class="btn btn-sm btn-outline-warning" data-cmd="btn_press">BTN press (timer +N / stop blink)</button>
             </div>
 
             <div class="input-group input-group-sm">
@@ -606,9 +607,9 @@ function applySnapshotToUI(snap) {
   let lastStateTs = 0;
 
   // people count refresh flags
-  let bestPi1 = 0;
-  let bestPi2 = 0;
-
+  let pi1 = { ts: 0, value: null };
+  let pi2 = { ts: 0, value: null };
+  
   // update actuators/sensors + scan system events
   snap.items.forEach(it => {
     const device = String(it.device || '').toUpperCase();
@@ -618,11 +619,13 @@ function applySnapshotToUI(snap) {
     const ts = Number(it.timestamp || 0);
 
     if (kind === 'system' && device === 'SYSTEM') {
+      const val = Number(it.value);
       if (typ === 'arming_started' && ts >= lastStateTs) { lastState = 'ARMING'; lastStateTs = ts; }
       if (typ === 'armed' && ts >= lastStateTs) { lastState = 'ARMED'; lastStateTs = ts; }
       if (typ === 'disarmed' && ts >= lastStateTs) { lastState = 'DISARMED'; lastStateTs = ts; }
-      if (pi === '1' && (!bestPi1 || ts > bestPi1.ts)) bestPi1 = it;
-      if (pi === '2' && (!bestPi2 || ts > bestPi2.ts)) bestPi2 = it;
+      if (!Number.isFinite(val)) return;
+      if (pi === '1' && ts >= pi1.ts) pi1 = { ts, value: val };
+      if (pi === '2' && ts >= pi2.ts) pi2 = { ts, value: val };
     }
 
     if (kind === 'actuator') {
@@ -673,10 +676,13 @@ function applySnapshotToUI(snap) {
     setBadge('armStateBadge', 'DISARMED', 'secondary');
   }
 
-  const peopleCountTotal = (bestPi1?.value || 0) + (bestPi2?.value || 0);
-  setBadge('peopleCountTotal', bestPi1 && bestPi2 ? String(peopleCountTotal) : '—', 'info');
-  setBadge('peopleCountPi1', bestPi1 ? String(bestPi1?.value || 0) : '—', bestPi1 ? 'secondary' : 'dark');
-  setBadge('peopleCountPi2', bestPi2 ? String(bestPi2?.value || 0) : '—', bestPi2 ? 'secondary' : 'dark');
+  const pi1Text = (pi1.value === null) ? '—' : String(pi1.value);
+  const pi2Text = (pi2.value === null) ? '—' : String(pi2.value);
+  const totalText = (pi1.value === null || pi2.value === null) ? '—' : String(pi1.value + pi2.value);
+
+  setBadge('peopleCountPi1', pi1Text, (pi1.value === null) ? 'dark' : 'secondary');
+  setBadge('peopleCountPi2', pi2Text, (pi2.value === null) ? 'dark' : 'secondary');
+  setBadge('peopleCountTotal', totalText, 'info');
 
 }
 

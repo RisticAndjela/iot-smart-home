@@ -81,7 +81,15 @@ def send_system_event(*, device, value, type_name, pi_id, simulated: bool = True
         )
     )
 
+def _fmt_mmss(seconds: float) -> str:
+    s = int(max(0, round(seconds)))
+    mm = s // 60
+    ss = s % 60
+    return f"{mm:02d}{ss:02d}"[-4:]
 
+def _emit_4sd(text4: str):
+    send_actuator_message(device="4SD", value=str(text4).rjust(4)[:4], type_name="display", pi_id="2", simulated=True)
+    
 def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb: Optional[RGB_LED], stop_event):
     """
     Single owner of actuator control.
@@ -216,6 +224,8 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
             "  lcd <text>\n"
             "  brgb_red|green|blue|white|off\n"
             "  brgb_cycle (toggle)\n"
+            "  timer_set <seconds>\n"
+            "  timer_add_n <seconds>\n"
         )
 
     def _print_status():
@@ -405,7 +415,36 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
             color = cmd.split("_", 1)[1]
             _set_rgb(color)
             return
+        
+        # --- Kitchen timer commands ---
+        if cmd.startswith("timer_set "):
+            # timer_set <seconds>
+            try:
+                sec = int(cmd.split(" ", 1)[1].strip())
+                sec = max(0, sec)
+                global_state["kt_remaining"] = float(sec)
+                global_state["kt_running"] = sec > 0
+                global_state["kt_blink"] = False
+                global_state["kt_last_tick"] = time.time()
+                print(f"[TIMER] Set to {sec}s")
+            except Exception:
+                print("[TIMER] Usage: timer_set <seconds>")
+            return
 
+        if cmd.startswith("timer_add_n "):
+            # timer_add_n <N>
+            try:
+                n = int(cmd.split(" ", 1)[1].strip())
+                global_state["kt_add_n"] = max(0, n)
+                print(f"[TIMER] Add-N set to {global_state['kt_add_n']}s")
+            except Exception:
+                print("[TIMER] Usage: timer_add_n <seconds>")
+            return
+
+        if cmd in ("btn_press", "btn"):
+            global_state["btn_pressed"] = True
+            print("[TIMER] Simulated BTN press via command")
+            return
         print(f"[CONTROLLER] Unknown command: {raw} (try 'help')")
 
     def control_loop():
@@ -569,6 +608,68 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
                 rgb_cycle_idx = (rgb_cycle_idx + 1) % len(rgb_cycle_colors)
                 rgb_cycle_last = now
 
+    
+            # --- KITCHEN TIMER (tačka 8) ---
+            # init defaults once
+            if "kt_remaining" not in global_state:
+                global_state["kt_remaining"] = 0.0
+                global_state["kt_running"] = False
+                global_state["kt_add_n"] = 10  # default N
+                global_state["kt_last_tick"] = now
+                global_state["kt_blink"] = False
+                global_state["kt_blink_on"] = True
+                global_state["kt_last_blink_toggle"] = now
+                global_state["kt_last_display"] = "    "
+
+            # BTN behavior
+            if global_state.get("btn_pressed", False):
+                global_state["btn_pressed"] = False  # consume edge
+
+                if global_state.get("kt_blink", False):
+                    # stop blinking
+                    global_state["kt_blink"] = False
+                    global_state["kt_running"] = False
+                    global_state["kt_remaining"] = 0.0
+                    print("[TIMER] Blink stopped by BTN")
+                else:
+                    add_n = int(global_state.get("kt_add_n", 0) or 0)
+                    if add_n > 0:
+                        global_state["kt_remaining"] = float(global_state.get("kt_remaining", 0.0) or 0.0) + add_n
+                        global_state["kt_running"] = True
+                        print(f"[TIMER] BTN +{add_n}s -> remaining={global_state['kt_remaining']:.0f}s")
+
+            # Tick countdown (once per second)
+            if global_state.get("kt_running", False) and not global_state.get("kt_blink", False):
+                last_tick = float(global_state.get("kt_last_tick", now) or now)
+                if now - last_tick >= 1.0:
+                    ticks = int((now - last_tick) // 1)
+                    rem = float(global_state.get("kt_remaining", 0.0) or 0.0)
+                    rem = max(0.0, rem - ticks)
+                    global_state["kt_remaining"] = rem
+                    global_state["kt_last_tick"] = last_tick + ticks
+
+                    if rem <= 0.0:
+                        global_state["kt_running"] = False
+                        global_state["kt_blink"] = True
+                        global_state["kt_blink_on"] = True
+                        global_state["kt_last_blink_toggle"] = now
+                        print("[TIMER] Time expired -> blinking 00:00")
+
+            # Blinking when expired
+            display_text = "    "
+            if global_state.get("kt_blink", False):
+                last_toggle = float(global_state.get("kt_last_blink_toggle", now) or now)
+                if now - last_toggle >= 0.5:
+                    global_state["kt_blink_on"] = not bool(global_state.get("kt_blink_on", True))
+                    global_state["kt_last_blink_toggle"] = now
+                display_text = "0000" if global_state.get("kt_blink_on", True) else "    "
+            else:
+                display_text = _fmt_mmss(float(global_state.get("kt_remaining", 0.0) or 0.0))
+
+            # Emit to 4SD only if changed (da ne spamujemo MQTT)
+            if display_text != global_state.get("kt_last_display"):
+                global_state["kt_last_display"] = display_text
+                _emit_4sd(display_text)
             time.sleep(0.2)
 
         # Cleanup on stop

@@ -209,7 +209,6 @@ def handle_command_message(topic: str, payload: dict):
 
     elif device == "BRGB" or topic_device == "brgb":
         enqueue_command(f"brgb_{cmd_text}")
-
     else:
         enqueue_command(cmd_text)
 
@@ -310,6 +309,12 @@ def handle_sensor_aggregation(topic: str, payload: dict):
     # -----------------------------
     if device == "DMS1" and ev_type in ("membrane", "keypad"):
         global_state["last_dms_key"] = value
+    
+    if device == "BTN" and ev_type == "button":
+        pressed = bool(value) and str(value) != "0"
+        if pressed:
+            global_state["btn_pressed"] = True  # edge trigger (controller će ga potrošiti)
+        return
 
 def mqtt_on_connect(client, userdata, flags, rc, properties=None):
     global mqtt_connected
@@ -329,7 +334,8 @@ def mqtt_on_disconnect(client, userdata, rc, properties=None):
 
 
 def mqtt_on_log(client, userdata, level, buf):
-    print("[DASH MQTT LOG]", buf)
+    # print("[DASH MQTT LOG]", buf)
+    pass
 
 
 def mqtt_on_message(client, userdata, msg):
@@ -447,7 +453,7 @@ def start_simulation_from_settings(settings: dict):
         if pi_id == "PI2" and "4SD" in actuators:
             run_4sd(actuators["4SD"], threads, stop_event)
             print("[DASH] 4SD initialized on PI2")
-
+        
     if dl or db or brgb:
         controller_thread = run_controller(dl, db, brgb, stop_event)
         print("[DASH] Controller started.")
@@ -478,7 +484,6 @@ def closing_main():
         pass
 
     print("App stopped cleanly.")
-
 
 @app.route("/")
 def index():
