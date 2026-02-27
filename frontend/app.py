@@ -91,6 +91,10 @@ INFLUX_ORG = os.getenv("INFLUX_ORG", "FTN")
 INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "iot-sensor-report")
 ENABLE_INFLUX = os.getenv("ENABLE_INFLUX", "1").strip().lower() in ("1", "true", "yes", "on")
 
+# UI views (Grafana + webcam)
+GRAFANA_URL = os.getenv("GRAFANA_URL", "http://localhost:3000")
+WEBCAM_URL = os.getenv("WEBCAM_URL", "")  # npr: http://localhost:8081/stream ili http://pi3:8081/stream
+
 mqtt_client = mqtt.Client(
     client_id=f"dashboard-main-{os.getpid()}",
     callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -152,6 +156,7 @@ def build_snapshot():
     return {
         "ts": int(time.time() * 1000),
         "mqtt_connected": mqtt_connected,
+        "people_count": int(global_state.get("people_count", 0)),
         "items": list(LATEST.values()),
     }
 
@@ -165,9 +170,6 @@ def snapshot_emitter():
             print("[DASH] snapshot_emitter error:", e)
 
 
-# -------------------------
-# Command mapping (preuzeto iz main.py logike)
-# -------------------------
 def handle_command_message(topic: str, payload: dict):
     parts = [p for p in (topic or "").strip("/").split("/") if p]
     base = parts[0].lower() if len(parts) > 0 else ""
@@ -186,7 +188,6 @@ def handle_command_message(topic: str, payload: dict):
     if not cmd_text:
         return
 
-    # Device-aware mapping
     if device == "DB" or topic_device == "db":
         if cmd_text == "on":
             enqueue_command("b")
@@ -209,9 +210,7 @@ def handle_command_message(topic: str, payload: dict):
         enqueue_command(f"brgb_{cmd_text}")
 
     else:
-        # Generic passthrough
         enqueue_command(cmd_text)
-
 
 def handle_sensor_aggregation(topic: str, payload: dict):
     parts = [p for p in (topic or "").strip("/").split("/") if p]
@@ -222,8 +221,13 @@ def handle_sensor_aggregation(topic: str, payload: dict):
     ev_type = str(payload.get("type") or payload.get("sensor_type") or "").lower()
     value = payload.get("value")
 
-    # DHT state aggregation (kao u main.py)
-    if base == "sensors" and "DHT" in device:
+    if base != "sensors":
+        return
+
+    # -----------------------------
+    # DHT -> global_state (vec imas)
+    # -----------------------------
+    if "DHT" in device:
         d_id = device.lower()
 
         if ev_type in ("temperature", "humidity"):
@@ -238,21 +242,84 @@ def handle_sensor_aggregation(topic: str, payload: dict):
             if "humidity" in value:
                 global_state[f"{d_id}_hum"] = value["humidity"]
 
+        return  # DHT handled
 
-# -------------------------
-# MQTT callbacks
-# -------------------------
+    # -----------------------------
+    # DPIR (motion) -> motion_dpirX
+    # -----------------------------
+    if device in ("DPIR1", "DPIR2", "DPIR3") and ev_type == "motion":
+        motion = bool(value) and str(value) != "0"
+        if device == "DPIR1":
+            global_state["motion_dpir1"] = motion
+        elif device == "DPIR2":
+            global_state["motion_dpir2"] = motion
+        elif device == "DPIR3":
+            global_state["motion_dpir3"] = motion
+        return
+
+    # -----------------------------
+    # DUS (ultrasonic) -> dusX_dist + dusX_prev_dist
+    # -----------------------------
+    if device in ("DUS1", "DUS2") and ev_type in ("ultrasonic", "distance"):
+        try:
+            dist = float(value)
+        except (TypeError, ValueError):
+            return
+
+        if device == "DUS1":
+            prev = global_state.get("dus1_dist", 0.0)
+            global_state["dus1_prev_dist"] = prev
+            global_state["dus1_dist"] = dist
+        else:
+            prev = global_state.get("dus2_dist", 0.0)
+            global_state["dus2_prev_dist"] = prev
+            global_state["dus2_dist"] = dist
+        return
+
+    # -----------------------------
+    # DS (door) -> door_open
+    # -----------------------------
+    if device in ("DS1", "DS2") and ev_type in ("door", "reed", "contact"):
+        door_is_open = bool(value) and str(value) != "0"
+
+        # cuvaj i pojedinacno, korisno za debug/spec
+        if device == "DS1":
+            global_state["ds1_open"] = door_is_open
+        else:
+            global_state["ds2_open"] = door_is_open
+
+        # agregat koji controller vec koristi
+        global_state["door_open"] = bool(global_state.get("ds1_open")) or bool(global_state.get("ds2_open"))
+        return
+
+    # -----------------------------
+    # GSG (gyro) -> significant_motion_gsg
+    # -----------------------------
+    if device == "GSG" and ev_type in ("gyro", "accelerometer"):
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return
+        # prag: ako je daleko od "mirnog" ~9.81
+        global_state["significant_motion_gsg"] = abs(v - 9.81) > 1.5
+        return
+
+    # -----------------------------
+    # DMS (membrane)
+    # -----------------------------
+    if device == "DMS1" and ev_type in ("membrane", "keypad"):
+        global_state["last_dms_key"] = value
+
 def mqtt_on_connect(client, userdata, flags, rc, properties=None):
     global mqtt_connected
     mqtt_connected = True
     print(f"[DASH MQTT] Connected rc={rc}")
 
-    # Subscribe to everything like "central main"
     client.subscribe("sensors/#")
     client.subscribe("actuators/#")
     client.subscribe("commands/#")
-    print("[DASH MQTT] Subscribed: sensors/#, actuators/#, commands/#")
-
+    client.subscribe("events/#")
+    print("[DASH MQTT] Subscribed: sensors/#, actuators/#, commands/#, events/#")
 
 def mqtt_on_disconnect(client, userdata, rc, properties=None):
     global mqtt_connected
@@ -269,16 +336,10 @@ def mqtt_on_message(client, userdata, msg):
         payload = json.loads(msg.payload.decode(errors="replace"))
         topic = msg.topic or ""
 
-        # Keep latest cache for UI
         update_latest(payload)
-
-        # Aggregations that were previously in main.py
         handle_sensor_aggregation(topic, payload)
-
-        # Commands -> controller queue
         handle_command_message(topic, payload)
 
-        # stream each event to UI (optional)
         socketio.emit("event", {"topic": topic, "event": payload})
     except Exception as e:
         print(f"[DASH MQTT] message error topic={msg.topic}: {e}")
@@ -308,11 +369,9 @@ def mqtt_publish_command(cmd: str, device_id: str | None):
     pi = "pi1"
     if device_id:
         s = str(device_id).strip().lower()
-        # expect "PI2" / "pi2"
         if s.startswith("pi"):
             pi = s
         else:
-            # if someone sends "2"
             pi = f"pi{s}"
 
     topic = f"commands/{_normalize_pi_topic(pi)}/controller"
@@ -324,20 +383,14 @@ def mqtt_publish_command(cmd: str, device_id: str | None):
         mqtt_client.publish(topic, payload)
 
 
-# -------------------------
-# Boot simulation + actuators (as main.py)
-# -------------------------
 def start_simulation_from_settings(settings: dict):
     global dl, db, brgb, controller_thread
 
-    # --- SIM threads started by components go into this list ---
-    # (we keep same pattern as main.py)
     for pi_id in settings:
         pi_settings = settings[pi_id]
         sensors = pi_settings.get("sensors", {})
         actuators = pi_settings.get("actuators", {})
 
-        # --- SENSORS ---
         if pi_id == "PI1":
             if "DS1" in sensors:
                 run_ds(sensors["DS1"], threads, stop_event)
@@ -372,7 +425,6 @@ def start_simulation_from_settings(settings: dict):
             if "DPIR3" in sensors:
                 run_pir(sensors["DPIR3"], threads, stop_event)
 
-        # --- ACTUATORS ---
         if "DL" in actuators and dl is None:
             pins_config = actuators["DL"].get("pins")
             if pins_config:
@@ -395,7 +447,6 @@ def start_simulation_from_settings(settings: dict):
             run_4sd(actuators["4SD"], threads, stop_event)
             print("[DASH] 4SD initialized on PI2")
 
-    # Start controller ONCE (it owns actuator control + actuator event emission)
     if dl or db or brgb:
         controller_thread = run_controller(dl, db, brgb, stop_event)
         print("[DASH] Controller started.")
@@ -428,12 +479,20 @@ def closing_main():
     print("App stopped cleanly.")
 
 
-# -------------------------
-# Flask routes
-# -------------------------
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/api/ui_config")
+def api_ui_config():
+    # frontend koristi da popuni iframe/img url-ove
+    return jsonify(
+        {
+            "grafana_url": GRAFANA_URL,
+            "webcam_url": WEBCAM_URL,
+        }
+    )
 
 
 @app.route("/api/settings")
@@ -528,7 +587,6 @@ if __name__ == "__main__":
 
     settings = load_settings()
 
-    # (optional) Influx writer callback
     influx_client = None
     influx_write_callback = None
 
@@ -549,10 +607,8 @@ if __name__ == "__main__":
         print("[DASH] Influx disabled.")
 
     try:
-        # Start MQTT subscriber first (so we immediately see events)
         mqtt_start()
 
-        # Start publisher thread (event_queue -> MQTT, plus optional Influx)
         publisher_thread = threading.Thread(
             target=batch_publisher,
             args=(mqtt_client, stop_event),
@@ -562,13 +618,10 @@ if __name__ == "__main__":
         publisher_thread.start()
         print("[DASH] batch_publisher started.")
 
-        # Start simulation and controller as main.py
         start_simulation_from_settings(settings)
 
-        # Start socket snapshot background task
         socketio.start_background_task(snapshot_emitter)
 
-        # Optional: console loop in background (easy + keeps tested behavior)
         console_thread = threading.Thread(target=console_loop, args=(stop_event,), daemon=True)
         console_thread.start()
         print("[DASH] console_loop started (daemon).")

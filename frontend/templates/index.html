@@ -20,7 +20,7 @@
 
       <!-- Sidebar -->
       <div class="col-lg-3 sidebar">
-        <!-- Connection / Status -->
+        <!-- Status -->
         <div class="card mb-3">
           <div class="card-body">
             <div class="d-flex align-items-center justify-content-between">
@@ -30,18 +30,43 @@
             <div class="mt-2 small text-muted">
               <span>Socket: </span><span id="socketBadge" class="badge bg-secondary">—</span>
               <span class="ms-2">Last snapshot: </span><span id="snapAge" class="text-muted">—</span>
+               <div class="mt-2 small text-muted">
+                  People (total): <span id="peopleCountTotal" class="badge bg-info">—</span>
+                </div>
+                <div class="mt-1 small text-muted">
+                  PeopleCount PI1: <span id="peopleCountPi1" class="badge bg-secondary">—</span>
+                  <span class="ms-2">PI2:</span> <span id="peopleCountPi2" class="badge bg-secondary">—</span>
+                </div>
             </div>
           </div>
         </div>
 
         <!-- Devices -->
-        <div class="card">
+        <div class="card mb-3">
           <div class="card-body">
             <div class="d-flex align-items-center justify-content-between mb-2">
               <h5 class="card-title mb-0">Devices</h5>
               <button class="btn btn-sm btn-outline-light" id="refreshDevicesBtn" type="button">Refresh</button>
             </div>
             <div id="devicesList" class="list-group" aria-label="Devices list"></div>
+          </div>
+        </div>
+
+        <!-- Views (Grafana / Webcam) -->
+        <div class="card mb-3">
+          <div class="card-body p-2">
+            <h6 class="px-2 mb-2">Views</h6>
+            <div class="list-group">
+              <a href="#" class="list-group-item list-group-item-action" id="viewWebcam">
+                Webcam
+              </a>
+              <a href="#" class="list-group-item list-group-item-action" id="viewGrafana">
+                Grafana
+              </a>
+            </div>
+            <div class="px-2 mt-2 small text-muted">
+              Grafana/Webcam URLs se čitaju iz <code>/api/ui_config</code>.
+            </div>
           </div>
         </div>
 
@@ -125,6 +150,69 @@ function setBadge(elId, text, tone='secondary') {
   b.innerText = text;
 }
 
+function setActiveListItem(element) {
+  // only within sidebar list-groups
+  document.querySelectorAll('.sidebar .list-group-item').forEach(x => x.classList.remove('active'));
+  element?.classList.add('active');
+}
+
+/* -----------------------------
+   UI config (Grafana/Webcam)
+------------------------------ */
+let UI_CONFIG = { grafana_url: 'http://localhost:3000/dashboard/snapshot/IAkV8sRPOd3XpSzei7U9U68DbRUl1Ued', webcam_url: '' };
+
+async function fetchUiConfig() {
+  try {
+    const res = await fetch('/api/ui_config', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Failed to fetch ui_config');
+    UI_CONFIG = await res.json();
+  } catch (e) {
+    log('ui_config error: ' + e.message, 'warn');
+  }
+}
+
+/* -----------------------------
+   Views
+------------------------------ */
+function showWebcam() {
+  const main = document.getElementById('mainArea');
+  const url = String(UI_CONFIG.webcam_url || '').trim();
+
+  const body = url
+    ? `<img src="${url}" class="img-fluid rounded" alt="Webcam Stream"
+            onerror="this.src='https://via.placeholder.com/640x480?text=No+Camera+Signal'">`
+    : `<div class="text-muted">WEBCAM_URL nije podešen. Postavi env var <code>WEBCAM_URL</code>.</div>`;
+
+  main.innerHTML = `
+    <div class="card">
+      <div class="card-body">
+        <h3 class="h5">Webcam</h3>
+        <div class="text-center bg-black rounded p-3"
+             style="min-height: 420px; display:flex; align-items:center; justify-content:center;">
+          ${body}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function showGrafana() {
+  const main = document.getElementById('mainArea');
+  const url = String(UI_CONFIG.grafana_url || 'http://localhost:3000').trim();
+
+  main.innerHTML = `
+    <div class="card" style="height: 85vh;">
+      <div class="card-body p-0">
+        <iframe src="${url}"
+                width="100%" height="100%"
+                frameborder="0"
+                style="border-radius: 8px;">
+        </iframe>
+      </div>
+    </div>
+  `;
+}
+
 /* -----------------------------
    API: commands
 ------------------------------ */
@@ -153,8 +241,8 @@ async function sendCommand(cmd) {
 /* -----------------------------
    State
 ------------------------------ */
-const sensorHist = {};   // code -> [{ts,value}]
-const charts = {};       // code -> Chart instance
+const sensorHist = {};
+const charts = {};
 const socket = io();
 
 let LAST_SNAPSHOT = null;
@@ -200,15 +288,13 @@ function renderDevices(devices) {
 
     a.addEventListener('click', (ev) => {
       ev.preventDefault();
+      setActiveListItem(a);
       selectDevice(d.id);
-      document.querySelectorAll('#devicesList .list-group-item').forEach(x=>x.classList.remove('active'));
-      a.classList.add('active');
     });
 
     list.appendChild(a);
   });
 
-  // If nothing selected, auto-select first
   if (!selectedDeviceId && devices.length > 0) {
     const first = devices[0];
     const firstEl = list.querySelector('[data-device-id]');
@@ -234,7 +320,6 @@ async function selectDevice(deviceId) {
     const data = await res.json();
     renderDeviceDetails(data);
 
-    // Apply latest snapshot values (if any)
     applySnapshotToUI(LAST_SNAPSHOT);
   } catch (err) {
     main.innerHTML = `<div class="alert alert-danger">Failed to load device: ${err.message}</div>`;
@@ -243,8 +328,102 @@ async function selectDevice(deviceId) {
 }
 
 /* -----------------------------
-   Render details (unchanged)
+   Render details + charts
 ------------------------------ */
+function getYBoundsFromData(values) {
+  if (!values || values.length === 0) return { min: 0, max: 100 };
+  const nums = values.map(v => Number(v)).filter(v => Number.isFinite(v));
+  if (nums.length === 0) return { min: 0, max: 100 };
+  let min = Math.min(...nums), max = Math.max(...nums);
+  if (max <= 1 && min >= 0) return { min: 0, max: 1 };
+  const span = Math.max(max - min, 1);
+  const pad = span * 0.2;
+  min = min - pad; max = max + pad;
+  return { min: Math.floor(min), max: Math.ceil(max) };
+}
+
+function renderSparkline(code) {
+  const canvas = document.getElementById(`chart-${code}`);
+  if (!canvas) return;
+
+  const dataVals = (sensorHist[code] || []).slice(-25).map(p => p.value);
+  const bounds = getYBoundsFromData(dataVals);
+
+  if (charts[code]) {
+    try { charts[code].destroy(); } catch(e) {}
+  }
+
+  charts[code] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: dataVals.map((_,i)=>i),
+      datasets: [{
+        data: dataVals,
+        borderColor: '#00d2ff',
+        borderWidth: 1,
+        pointRadius: 0,
+        tension: 0.35
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display:false },
+        y: {
+          display:true,
+          min: bounds.min,
+          max: bounds.max,
+          ticks: { maxTicksLimit:3, color:'rgba(255,255,255,0.6)' },
+          grid: { color: 'rgba(255,255,255,0.06)' }
+        }
+      },
+      plugins: { legend:{ display:false }, tooltip:{ enabled:false } }
+    }
+  });
+}
+
+function pushNumeric(code, value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return;
+
+  sensorHist[code] = sensorHist[code] || [];
+  sensorHist[code].push({ ts: Date.now(), value: num });
+  if (sensorHist[code].length > 200) sensorHist[code].shift();
+
+  const chart = charts[code];
+  if (!chart) return;
+
+  const lastN = sensorHist[code].slice(-25).map(p => p.value);
+  chart.data.labels = lastN.map((_,i)=>i);
+  chart.data.datasets[0].data = lastN;
+  const bounds = getYBoundsFromData(lastN);
+  chart.options.scales.y.min = bounds.min;
+  chart.options.scales.y.max = bounds.max;
+  chart.update('none');
+}
+
+function updateSensorValueUI(code, value, simulated=false) {
+  const vEl = document.getElementById(`value-${code}`);
+  if (!vEl) return;
+
+  let display = value;
+  if (value && typeof value === 'object') {
+    const parts = [];
+    if (value.temperature !== undefined) parts.push(`${value.temperature}°C`);
+    if (value.humidity !== undefined) parts.push(`${value.humidity}%`);
+    display = parts.join(' / ') || safeJsonStringify(value);
+  } else if (Number.isFinite(Number(value))) {
+    display = String(Number(value));
+  } else {
+    display = String(value);
+  }
+
+  vEl.innerText = display + (simulated ? ' (sim)' : '');
+  pushNumeric(code, value);
+}
+
 function renderDeviceDetails(data) {
   const main = document.getElementById('mainArea');
   main.innerHTML = '';
@@ -254,7 +433,6 @@ function renderDeviceDetails(data) {
   header.appendChild(el('small','text-muted', data.description || ''));
   main.appendChild(header);
 
-  // Sensors
   main.appendChild(el('h5','mt-2','Sensors'));
   const sensorsRow = el('div','row g-3');
 
@@ -274,7 +452,6 @@ function renderDeviceDetails(data) {
     valueEl.id = `value-${s.code}`;
     body.appendChild(valueEl);
 
-    // For DHT: show compact T/H placeholders (we fill from snapshot)
     if (String(s.code || '').toUpperCase().startsWith('DHT')) {
       const th = el('div','small text-muted');
       th.innerHTML = `<span class="me-2">T:</span><span id="dht-t-${s.code}">—</span>
@@ -296,7 +473,6 @@ function renderDeviceDetails(data) {
 
   main.appendChild(sensorsRow);
 
-  // Actuators
   main.appendChild(el('h5','mt-4','Actuators'));
   const actuatorsRow = el('div','row g-3 mt-1');
 
@@ -467,11 +643,22 @@ function updateSensorValueUI(code, value, simulated=false) {
 ------------------------------ */
 function applySnapshotToUI(snap) {
   if (!snap || !Array.isArray(snap.items)) return;
+  let bestPi1 = null;
+  let bestPi2 = null;
 
   snap.items.forEach(it => {
     const device = String(it.device || '').toUpperCase();
     const kind = String(it.kind || '').toLowerCase();
     const typ = String(it.type || '').toLowerCase();
+    const pi = String(it.pi || it.pi_id || '').replace(/^pi/i,'');
+
+    if (kind === 'system' && device === 'SYSTEM' && typ === 'peoplecount') {
+      const ts = Number(it.timestamp || 0);
+      const rec = { ts, value: it.value };
+
+      if (pi === '1' && (!bestPi1 || ts > bestPi1.ts)) bestPi1 = rec;
+      if (pi === '2' && (!bestPi2 || ts > bestPi2.ts)) bestPi2 = rec;
+    }
 
     if (kind === 'actuator') {
       const st = document.getElementById(`actstate-${device}`);
@@ -509,6 +696,18 @@ function applySnapshotToUI(snap) {
       }
     }
   });
+
+  const pi1El = document.getElementById('peopleCountPi1');
+  if (pi1El) pi1El.innerText = bestPi1 ? String(bestPi1.value) : '—';
+
+  const pi2El = document.getElementById('peopleCountPi2');
+  if (pi2El) pi2El.innerText = bestPi2 ? String(bestPi2.value) : '—';
+
+  const totalEl = document.getElementById('peopleCountTotal');
+  if (totalEl) {
+    const total = (bestPi1 ? Number(bestPi1.value) : 0) + (bestPi2 ? Number(bestPi2.value) : 0);
+    totalEl.innerText = String(total);
+  }
 }
 
 /* -----------------------------
@@ -527,7 +726,6 @@ socket.on('disconnect', ()=> {
 socket.on('snapshot', snap => {
   LAST_SNAPSHOT = snap;
   lastSnapshotAt = Date.now();
-
   const connected = !!(snap && snap.mqtt_connected);
   if (lastMqttConnected === null) {
     log(`MQTT: ${connected ? 'connected' : 'disconnected'}`, connected ? 'info' : 'warn');
@@ -546,9 +744,18 @@ socket.on('snapshot', snap => {
 });
 
 socket.on('event', payload => {
-  // Debug: prikazi eventove u UI logs (po potrebi ugasi)
   log(`Event ${payload.topic}: ${safeJsonStringify(payload.event)}`);
 });
+
+socket.on('event', payload => {
+  const ev = payload?.event;
+  if (!ev) return;
+
+  if (String(ev.kind).toLowerCase() === 'system' && String(ev.type).toLowerCase() === 'peoplecount') {
+    log(`PeopleCount = ${ev.value} (pi=${ev.pi})`);
+  }
+});
+
 
 /* -----------------------------
    UI ticks
@@ -564,6 +771,7 @@ setInterval(() => {
 /* -----------------------------
    Buttons binding
 ------------------------------ */
+
 document.getElementById('refreshDevicesBtn')?.addEventListener('click', fetchDevices);
 
 document.getElementById('clearLogsBtn')?.addEventListener('click', () => {
@@ -588,11 +796,27 @@ document.getElementById('customCmd')?.addEventListener('keydown', (e) => {
   }
 });
 
+/* Views buttons */
+document.getElementById('viewWebcam')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  setActiveListItem(ev.currentTarget);
+  showWebcam();
+});
+
+document.getElementById('viewGrafana')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  setActiveListItem(ev.currentTarget);
+  showGrafana();
+});
+
 /* -----------------------------
    Init
 ------------------------------ */
-fetchDevices();
-setBadge('socketBadge', 'connecting…', 'secondary');
+(async function init() {
+  setBadge('socketBadge', 'connecting…', 'secondary');
+  await fetchUiConfig();
+  await fetchDevices();
+})();
 </script>
 </body>
 </html>

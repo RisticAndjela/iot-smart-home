@@ -230,6 +230,8 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
             "dht2": {"t": global_state.get("dht2_temp"), "h": global_state.get("dht2_hum")},
             "dht3": {"t": global_state.get("dht3_temp"), "h": global_state.get("dht3_hum")},
             "lcd": global_state.get("lcd_message"),
+            "dus1_prev_dist": global_state.get("dus1_prev_dist"),
+            "dus2_prev_dist": global_state.get("dus2_prev_dist"),
         }
         print("[STATUS]", snapshot)
 
@@ -306,6 +308,7 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
                 n = int(cmd.split(" ", 1)[1].strip())
                 global_state["people_count"] = max(0, n)
                 send_system_event(device="SYSTEM", value=global_state["people_count"], type_name="PeopleCount", pi_id="1")
+                send_system_event(device="SYSTEM", value=global_state["people_count"], type_name="PeopleCount", pi_id="2")
                 print(f"[CONTROLLER] people_count set to {global_state['people_count']}")
             except Exception:
                 print("[CONTROLLER] Usage: people_set <number>")
@@ -342,6 +345,8 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
         if cmd in ("people_reset", "people0"):
             global_state["people_count"] = 0
             send_system_event(device="SYSTEM", value=0, type_name="PeopleCount", pi_id="1")
+            send_system_event(device="SYSTEM", value=0, type_name="PeopleCount", pi_id="2")
+
             print("[CONTROLLER] people_count reset to 0")
             return
 
@@ -398,6 +403,7 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
             while True:
                 try:
                     raw_cmd = _cmd_queue.get_nowait()
+                    # print(f"[CONTROLLER] got cmd: {raw_cmd!r}")
                 except queue.Empty:
                     break
                 try:
