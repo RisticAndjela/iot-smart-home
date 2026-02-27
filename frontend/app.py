@@ -157,6 +157,7 @@ def build_snapshot():
         "ts": int(time.time() * 1000),
         "mqtt_connected": mqtt_connected,
         "people_count": int(global_state.get("people_count", 0)),
+        "alarm_active": bool(global_state.get("alarm_active", False)),
         "items": list(LATEST.values()),
     }
 

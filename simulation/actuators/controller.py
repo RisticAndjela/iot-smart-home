@@ -16,6 +16,7 @@ _cmd_queue: "queue.Queue[str]" = queue.Queue()
 def get_cmd_queue():
     return _cmd_queue
 
+
 def _make_event(*, pi_id, device, type_name, value, simulated=True, timestamp=None, kind=None):
     if timestamp is None:
         timestamp = time.time()
@@ -80,6 +81,7 @@ def send_system_event(*, device, value, type_name, pi_id, simulated: bool = True
         )
     )
 
+
 def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb: Optional[RGB_LED], stop_event):
     """
     Single owner of actuator control.
@@ -113,6 +115,9 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
     rgb_cycle_last = 0.0
     rgb_cycle_colors = ["RED", "GREEN", "BLUE", "WHITE", "OFF"]
     rgb_cycle_idx = 0
+
+    # Rule constants
+    ENTRY_DELAY_SECONDS = 10.0  # tačka 4b
 
     def _cancel_timer(timer: Optional[threading.Timer]) -> Optional[threading.Timer]:
         if timer:
@@ -232,10 +237,16 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
             "lcd": global_state.get("lcd_message"),
             "dus1_prev_dist": global_state.get("dus1_prev_dist"),
             "dus2_prev_dist": global_state.get("dus2_prev_dist"),
+            "entry_delay_active": global_state.get("entry_delay_active"),
         }
         print("[STATUS]", snapshot)
 
     def _trigger_alarm():
+        now = time.time()
+        cooldown_until = float(global_state.get("alarm_cooldown_until", 0.0) or 0.0)
+        if now < cooldown_until:
+            return
+
         # edge-triggered
         if not global_state.get("alarm_active"):
             global_state["alarm_active"] = True
@@ -244,15 +255,17 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
 
         # Buzzer behavior: ON continuously when alarm is active (real or sim)
         if buzzer:
-            buzzer_timer_local = buzzer_timer  # read current
-            if buzzer_timer_local:
-                # cancel any pending auto-off; alarm has priority
-                pass
             _buzzer_on_emit(auto_off_seconds=None)
 
     def _alarm_off():
         global_state["alarm_active"] = False
+        global_state["alarm_cooldown_until"] = time.time() + 10.0  # 10s cooldown
         send_system_event(device="SYSTEM", value=False, type_name="alarm_off", pi_id="1")
+
+        # reset entry delay too
+        global_state["entry_delay_active"] = False
+        global_state["entry_delay_start"] = 0.0
+
         if buzzer:
             _buzzer_off_emit()
         print("[CONTROLLER] Alarm OFF")
@@ -264,18 +277,24 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
         global_state["system_arming"] = True
         nonlocal_vars["arming_start_time"] = 0.0
         send_system_event(device="SYSTEM", value=True, type_name="arming_started", pi_id="1")
-        print("[CONTROLLER] ARM requested. You have 10 seconds to leave the house!")
+        print("[CONTROLLER] ARM requested (PIN OK). You have 10 seconds to leave the house!")
 
     def _disarm():
         global_state["alarm_active"] = False
         global_state["system_armed"] = False
         global_state["system_arming"] = False
+        global_state["alarm_cooldown_until"] = time.time() + 10.0
+
+        # reset entry delay
+        global_state["entry_delay_active"] = False
+        global_state["entry_delay_start"] = 0.0
+
         nonlocal_vars["arming_start_time"] = 0.0
         send_system_event(device="SYSTEM", value=True, type_name="disarmed", pi_id="1")
 
         if buzzer:
             _buzzer_off_emit()
-        print("[CONTROLLER] System DISARMED")
+        print("[CONTROLLER] System DISARMED (PIN OK)")
 
     # Small trick to allow inner funcs to update some scalars cleanly
     nonlocal_vars = {"arming_start_time": 0.0}
@@ -346,7 +365,6 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
             global_state["people_count"] = 0
             send_system_event(device="SYSTEM", value=0, type_name="PeopleCount", pi_id="1")
             send_system_event(device="SYSTEM", value=0, type_name="PeopleCount", pi_id="2")
-
             print("[CONTROLLER] people_count reset to 0")
             return
 
@@ -367,7 +385,6 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
 
         # Buzzer commands
         if cmd in ("b", "db_on"):
-            # Auto-off only for simulation
             _buzzer_on_emit(auto_off_seconds=(1.5 if buzzer_sim else None))
             return
         if cmd in ("boff", "db_off"):
@@ -398,26 +415,18 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
 
         while not stop_event.is_set():
             now = time.time()
+            system_active = bool(global_state.get("system_armed")) or bool(global_state.get("system_arming"))
 
             # --- COMMANDS ---
             while True:
                 try:
                     raw_cmd = _cmd_queue.get_nowait()
-                    # print(f"[CONTROLLER] got cmd: {raw_cmd!r}")
                 except queue.Empty:
                     break
                 try:
-                    # Special existing command from keypad logic
+                    # PIN always DISARMS (tačka 4c)
                     if raw_cmd == "pin_correct":
-                        is_active = (
-                            global_state.get("system_armed")
-                            or global_state.get("alarm_active")
-                            or global_state.get("system_arming")
-                        )
-                        if is_active:
-                            _disarm()
-                        else:
-                            _arm()
+                        _disarm()
                     else:
                         _handle_command(raw_cmd)
                 except Exception as e:
@@ -428,8 +437,6 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
                 global_state["last_dpir1_time"] = now
                 if not last_light_state:
                     _light_on_emit()
-                    # keep it ON for 10 seconds from last motion
-                    # (auto-off timer is not used here)
 
             if last_light_state and (now - global_state.get("last_dpir1_time", 0.0) > 10.0):
                 _light_off_emit()
@@ -472,14 +479,27 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
             else:
                 dpir2_counted = False
 
-            # --- RULE 3: Door left open (5 seconds) triggers alarm ---
-            if global_state.get("door_open"):
-                if global_state.get("ds1_open_time", 0.0) == 0.0:
-                    global_state["ds1_open_time"] = now
-                elif now - global_state["ds1_open_time"] > 5.0:
+            # --- RULE 3: DS1 or DS2 left open > 5 seconds triggers alarm (only when active) ---
+            if system_active:
+                if global_state.get("ds1_open", False):
+                    if global_state.get("ds1_open_time", 0.0) == 0.0:
+                        global_state["ds1_open_time"] = now
+                else:
+                    global_state["ds1_open_time"] = 0.0
+
+                if global_state.get("ds2_open", False):
+                    if global_state.get("ds2_open_time", 0.0) == 0.0:
+                        global_state["ds2_open_time"] = now
+                else:
+                    global_state["ds2_open_time"] = 0.0
+
+                if global_state.get("ds1_open_time", 0.0) and (now - global_state["ds1_open_time"] > 5.0):
+                    _trigger_alarm()
+                if global_state.get("ds2_open_time", 0.0) and (now - global_state["ds2_open_time"] > 5.0):
                     _trigger_alarm()
             else:
                 global_state["ds1_open_time"] = 0.0
+                global_state["ds2_open_time"] = 0.0
 
             # --- RULE 4: Arming delay ---
             if global_state.get("system_arming"):
@@ -492,23 +512,41 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
                     send_system_event(device="SYSTEM", value=True, type_name="armed", pi_id="1")
                     print("[CONTROLLER] System ARMED")
 
+            # --- RULE 4b: Door entry delay when ARMED (PIN required) ---
             if global_state.get("system_armed") and global_state.get("door_open"):
-                _trigger_alarm()
+                if not global_state.get("entry_delay_active", False):
+                    global_state["entry_delay_active"] = True
+                    global_state["entry_delay_start"] = now
+                    print("[ALARM] Entry delay started (door opened). Waiting for PIN...")
+                else:
+                    started = float(global_state.get("entry_delay_start", 0.0) or 0.0)
+                    if started and (now - started) > ENTRY_DELAY_SECONDS:
+                        _trigger_alarm()
+            else:
+                global_state["entry_delay_active"] = False
+                global_state["entry_delay_start"] = 0.0
 
-            # --- RULE 5: Empty house + motion triggers alarm ---
-            if global_state.get("people_count", 0) == 0 and global_state.get("motion"):
-                _trigger_alarm()
+            # --- RULE 5: Empty house + motion triggers alarm (ONLY when ARMED) ---
+            if global_state.get("system_armed", False):
+                any_motion = (
+                    bool(global_state.get("motion_dpir1"))
+                    or bool(global_state.get("motion_dpir2"))
+                    or bool(global_state.get("motion_dpir3"))
+                )
+                if global_state.get("people_count", 0) == 0 and any_motion:
+                    _trigger_alarm()
 
-            # --- RULE 6: GSG significant motion triggers alarm ---
-            if global_state.get("significant_motion_gsg", False):
-                _trigger_alarm()
+            # --- RULE 6: GSG significant motion triggers alarm (only when active, with cooldown) ---
+            if system_active and global_state.get("significant_motion_gsg", False):
+                last = float(global_state.get("last_gsg_alarm_time", 0.0) or 0.0)
+                if now - last > 5.0:
+                    global_state["last_gsg_alarm_time"] = now
+                    _trigger_alarm()
 
             # --- Alarm behavior: ensure buzzer ON while active ---
             if global_state.get("alarm_active"):
                 if buzzer:
                     buzzer.on()
-                    # Note: we don't spam events; we emitted alarm_on + DB on transition
-                # you could also flash DL or set BRGB red here if you want
 
             # --- LCD rotation (PI3) ---
             if now - last_lcd_rotation_time > 5.0:

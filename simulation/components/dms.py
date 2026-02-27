@@ -34,10 +34,24 @@ def make_dms_callback(settings, write_callback=None):
         )
         event_queue.put(event)
 
+        # PIN check on 4 digits
         if len(global_state["pin_buffer"]) == 4:
             if global_state["pin_buffer"] == "1234":
-                print("[DMS] PIN ISPRAVAN - Šaljem komandu kontroleru...")
-                get_cmd_queue().put("pin_correct")
+                # Spec:
+                # - if system inactive -> activate (arming then armed after 10s)
+                # - if system active or alarm active -> disarm & stop alarm
+                system_is_active = (
+                    bool(global_state.get("system_armed"))
+                    or bool(global_state.get("system_arming"))
+                    or bool(global_state.get("alarm_active"))
+                )
+
+                if system_is_active:
+                    print("[DMS] PIN ISPRAVAN - DISARM (pin_correct)")
+                    get_cmd_queue().put("pin_correct")
+                else:
+                    print("[DMS] PIN ISPRAVAN - ARM")
+                    get_cmd_queue().put("arm")
             else:
                 print("[DMS] POGREŠAN PIN!")
 

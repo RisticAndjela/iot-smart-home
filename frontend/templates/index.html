@@ -27,16 +27,25 @@
               <h5 class="card-title mb-0">Status</h5>
               <span id="mqttBadge" class="badge rounded-pill bg-secondary">MQTT: —</span>
             </div>
+
             <div class="mt-2 small text-muted">
               <span>Socket: </span><span id="socketBadge" class="badge bg-secondary">—</span>
               <span class="ms-2">Last snapshot: </span><span id="snapAge" class="text-muted">—</span>
-               <div class="mt-2 small text-muted">
-                  People (total): <span id="peopleCountTotal" class="badge bg-info">—</span>
-                </div>
-                <div class="mt-1 small text-muted">
-                  PeopleCount PI1: <span id="peopleCountPi1" class="badge bg-secondary">—</span>
-                  <span class="ms-2">PI2:</span> <span id="peopleCountPi2" class="badge bg-secondary">—</span>
-                </div>
+
+              <div class="mt-2 small text-muted">
+                Alarm:
+                <span id="alarmStateBadge" class="badge bg-secondary">—</span>
+                <span class="ms-2">Mode:</span>
+                <span id="armStateBadge" class="badge bg-secondary">—</span>
+              </div>
+
+              <div class="mt-2 small text-muted">
+                People (total): <span id="peopleCountTotal" class="badge bg-info">—</span>
+              </div>
+              <div class="mt-1 small text-muted">
+                PeopleCount PI1: <span id="peopleCountPi1" class="badge bg-secondary">—</span>
+                <span class="ms-2">PI2:</span> <span id="peopleCountPi2" class="badge bg-secondary">—</span>
+              </div>
             </div>
           </div>
         </div>
@@ -57,12 +66,8 @@
           <div class="card-body p-2">
             <h6 class="px-2 mb-2">Views</h6>
             <div class="list-group">
-              <a href="#" class="list-group-item list-group-item-action" id="viewWebcam">
-                Webcam
-              </a>
-              <a href="#" class="list-group-item list-group-item-action" id="viewGrafana">
-                Grafana
-              </a>
+              <a href="#" class="list-group-item list-group-item-action" id="viewWebcam">Webcam</a>
+              <a href="#" class="list-group-item list-group-item-action" id="viewGrafana">Grafana</a>
             </div>
             <div class="px-2 mt-2 small text-muted">
               Grafana/Webcam URLs se čitaju iz <code>/api/ui_config</code>.
@@ -74,6 +79,10 @@
         <div class="card mt-3">
           <div class="card-body">
             <h6 class="mb-2">Quick commands (controller)</h6>
+
+            <div class="alert alert-warning py-2 small">
+              Po specifikaciji: ARM/DISARM ide preko DMS PIN-a (1234). Ovi tasteri su debug.
+            </div>
 
             <div class="d-flex flex-wrap gap-2 mb-2">
               <button class="btn btn-sm btn-outline-light" data-cmd="help">help</button>
@@ -117,6 +126,38 @@
     </div>
   </div>
 
+  <!-- Alarm PIN Modal -->
+  <div class="modal fade" id="alarmPinModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content bg-dark text-light">
+        <div class="modal-header">
+          <h5 class="modal-title">ALARM — Enter PIN</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            Alarm is active. Enter PIN to disarm.
+          </div>
+
+          <div class="input-group">
+            <input id="alarmPinInput" type="password" class="form-control" placeholder="PIN" autocomplete="off" />
+            <button class="btn btn-danger" id="alarmPinSubmitBtn" type="button">Submit</button>
+          </div>
+
+          <div class="mt-2 small text-muted">
+            Time left: <span id="alarmPinCountdown">—</span>s
+          </div>
+
+          <div class="mt-2 small text-danger" id="alarmPinError" style="display:none;"></div>
+
+          <div class="mt-3 small text-muted">
+            Tip: Po specifikaciji, ispravan PIN se unosi na DMS. Ovaj dialog je pomoć u web-u.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 <script>
 /* -----------------------------
    Helpers
@@ -151,7 +192,6 @@ function setBadge(elId, text, tone='secondary') {
 }
 
 function setActiveListItem(element) {
-  // only within sidebar list-groups
   document.querySelectorAll('.sidebar .list-group-item').forEach(x => x.classList.remove('active'));
   element?.classList.add('active');
 }
@@ -159,7 +199,7 @@ function setActiveListItem(element) {
 /* -----------------------------
    UI config (Grafana/Webcam)
 ------------------------------ */
-let UI_CONFIG = { grafana_url: 'http://localhost:3000/dashboard/snapshot/IAkV8sRPOd3XpSzei7U9U68DbRUl1Ued', webcam_url: '' };
+let UI_CONFIG = { grafana_url: 'http://localhost:3000', webcam_url: '' };
 
 async function fetchUiConfig() {
   try {
@@ -250,6 +290,13 @@ let lastMqttConnected = null;
 let lastSnapshotAt = null;
 let selectedDeviceId = null;
 
+// alarm modal state
+let alarmModal = null;
+let alarmCountdownTimer = null;
+let alarmSecondsLeft = 0;
+const ALARM_PIN = '1234';
+const ALARM_PIN_TTL = 10;
+
 /* -----------------------------
    Devices list
 ------------------------------ */
@@ -328,7 +375,7 @@ async function selectDevice(deviceId) {
 }
 
 /* -----------------------------
-   Render details + charts
+   Charts helpers
 ------------------------------ */
 function getYBoundsFromData(values) {
   if (!values || values.length === 0) return { min: 0, max: 100 };
@@ -424,6 +471,9 @@ function updateSensorValueUI(code, value, simulated=false) {
   pushNumeric(code, value);
 }
 
+/* -----------------------------
+   Render details
+------------------------------ */
 function renderDeviceDetails(data) {
   const main = document.getElementById('mainArea');
   main.innerHTML = '';
@@ -542,122 +592,37 @@ function renderDeviceDetails(data) {
 }
 
 /* -----------------------------
-   Charts
------------------------------- */
-function getYBoundsFromData(values) {
-  if (!values || values.length === 0) return { min: 0, max: 100 };
-  const nums = values.map(v => Number(v)).filter(v => Number.isFinite(v));
-  if (nums.length === 0) return { min: 0, max: 100 };
-  let min = Math.min(...nums), max = Math.max(...nums);
-  if (max <= 1 && min >= 0) return { min: 0, max: 1 };
-  const span = Math.max(max - min, 1);
-  const pad = span * 0.2;
-  min = min - pad; max = max + pad;
-  return { min: Math.floor(min), max: Math.ceil(max) };
-}
-
-function renderSparkline(code) {
-  const canvas = document.getElementById(`chart-${code}`);
-  if (!canvas) return;
-
-  const dataVals = (sensorHist[code] || []).slice(-25).map(p => p.value);
-  const bounds = getYBoundsFromData(dataVals);
-
-  if (charts[code]) {
-    try { charts[code].destroy(); } catch(e) {}
-  }
-
-  charts[code] = new Chart(canvas, {
-    type: 'line',
-    data: {
-      labels: dataVals.map((_,i)=>i),
-      datasets: [{
-        data: dataVals,
-        borderColor: '#00d2ff',
-        borderWidth: 1,
-        pointRadius: 0,
-        tension: 0.35
-      }]
-    },
-    options: {
-      animation: false,
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { display:false },
-        y: {
-          display:true,
-          min: bounds.min,
-          max: bounds.max,
-          ticks: { maxTicksLimit:3, color:'rgba(255,255,255,0.6)' },
-          grid: { color: 'rgba(255,255,255,0.06)' }
-        }
-      },
-      plugins: { legend:{ display:false }, tooltip:{ enabled:false } }
-    }
-  });
-}
-
-function pushNumeric(code, value) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return;
-
-  sensorHist[code] = sensorHist[code] || [];
-  sensorHist[code].push({ ts: Date.now(), value: num });
-  if (sensorHist[code].length > 200) sensorHist[code].shift();
-
-  const chart = charts[code];
-  if (!chart) return;
-
-  const lastN = sensorHist[code].slice(-25).map(p => p.value);
-  chart.data.labels = lastN.map((_,i)=>i);
-  chart.data.datasets[0].data = lastN;
-  const bounds = getYBoundsFromData(lastN);
-  chart.options.scales.y.min = bounds.min;
-  chart.options.scales.y.max = bounds.max;
-  chart.update('none');
-}
-
-function updateSensorValueUI(code, value, simulated=false) {
-  const vEl = document.getElementById(`value-${code}`);
-  if (!vEl) return;
-
-  let display = value;
-  if (value && typeof value === 'object') {
-    const parts = [];
-    if (value.temperature !== undefined) parts.push(`${value.temperature}°C`);
-    if (value.humidity !== undefined) parts.push(`${value.humidity}%`);
-    display = parts.join(' / ') || safeJsonStringify(value);
-  } else if (Number.isFinite(Number(value))) {
-    display = String(Number(value));
-  } else {
-    display = String(value);
-  }
-
-  vEl.innerText = display + (simulated ? ' (sim)' : '');
-  pushNumeric(code, value);
-}
-
-/* -----------------------------
    Snapshot -> UI
 ------------------------------ */
 function applySnapshotToUI(snap) {
   if (!snap || !Array.isArray(snap.items)) return;
-  let bestPi1 = null;
-  let bestPi2 = null;
 
+  // alarm badge (tačke 4/5/6)
+  const alarmActive = !!snap.alarm_active;
+  setBadge('alarmStateBadge', alarmActive ? 'ALARM ON' : 'ALARM OFF', alarmActive ? 'danger' : 'secondary');
+
+  // arm state inference (arming_started / armed / disarmed)
+  let lastState = null; // 'ARMING' | 'ARMED' | 'DISARMED'
+  let lastStateTs = 0;
+
+  // people count refresh flags
+  let bestPi1 = 0;
+  let bestPi2 = 0;
+
+  // update actuators/sensors + scan system events
   snap.items.forEach(it => {
     const device = String(it.device || '').toUpperCase();
     const kind = String(it.kind || '').toLowerCase();
     const typ = String(it.type || '').toLowerCase();
     const pi = String(it.pi || it.pi_id || '').replace(/^pi/i,'');
+    const ts = Number(it.timestamp || 0);
 
-    if (kind === 'system' && device === 'SYSTEM' && typ === 'peoplecount') {
-      const ts = Number(it.timestamp || 0);
-      const rec = { ts, value: it.value };
-
-      if (pi === '1' && (!bestPi1 || ts > bestPi1.ts)) bestPi1 = rec;
-      if (pi === '2' && (!bestPi2 || ts > bestPi2.ts)) bestPi2 = rec;
+    if (kind === 'system' && device === 'SYSTEM') {
+      if (typ === 'arming_started' && ts >= lastStateTs) { lastState = 'ARMING'; lastStateTs = ts; }
+      if (typ === 'armed' && ts >= lastStateTs) { lastState = 'ARMED'; lastStateTs = ts; }
+      if (typ === 'disarmed' && ts >= lastStateTs) { lastState = 'DISARMED'; lastStateTs = ts; }
+      if (pi === '1' && (!bestPi1 || ts > bestPi1.ts)) bestPi1 = it;
+      if (pi === '2' && (!bestPi2 || ts > bestPi2.ts)) bestPi2 = it;
     }
 
     if (kind === 'actuator') {
@@ -697,22 +662,95 @@ function applySnapshotToUI(snap) {
     }
   });
 
-  const pi1El = document.getElementById('peopleCountPi1');
-  if (pi1El) pi1El.innerText = bestPi1 ? String(bestPi1.value) : '—';
-
-  const pi2El = document.getElementById('peopleCountPi2');
-  if (pi2El) pi2El.innerText = bestPi2 ? String(bestPi2.value) : '—';
-
-  const totalEl = document.getElementById('peopleCountTotal');
-  if (totalEl) {
-    const total = (bestPi1 ? Number(bestPi1.value) : 0) + (bestPi2 ? Number(bestPi2.value) : 0);
-    totalEl.innerText = String(total);
+  // set arm badge
+  if (alarmActive) {
+    setBadge('armStateBadge', 'ALARM', 'danger');
+  } else if (lastState === 'ARMED') {
+    setBadge('armStateBadge', 'ARMED', 'success');
+  } else if (lastState === 'ARMING') {
+    setBadge('armStateBadge', 'ARMING', 'warning');
+  } else {
+    setBadge('armStateBadge', 'DISARMED', 'secondary');
   }
+
+  const peopleCountTotal = (bestPi1?.value || 0) + (bestPi2?.value || 0);
+  setBadge('peopleCountTotal', bestPi1 && bestPi2 ? String(peopleCountTotal) : '—', 'info');
+  setBadge('peopleCountPi1', bestPi1 ? String(bestPi1?.value || 0) : '—', bestPi1 ? 'secondary' : 'dark');
+  setBadge('peopleCountPi2', bestPi2 ? String(bestPi2?.value || 0) : '—', bestPi2 ? 'secondary' : 'dark');
+
+}
+
+/* -----------------------------
+   Alarm modal
+------------------------------ */
+function showAlarmPinDialog() {
+  const modalEl = document.getElementById('alarmPinModal');
+  if (!modalEl) return;
+
+  if (!alarmModal) alarmModal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+
+  const inp = document.getElementById('alarmPinInput');
+  const err = document.getElementById('alarmPinError');
+  if (inp) inp.value = '';
+  if (err) { err.style.display='none'; err.innerText=''; }
+
+  alarmSecondsLeft = ALARM_PIN_TTL;
+  const cd = document.getElementById('alarmPinCountdown');
+  if (cd) cd.innerText = String(alarmSecondsLeft);
+
+  if (alarmCountdownTimer) clearInterval(alarmCountdownTimer);
+  alarmCountdownTimer = setInterval(() => {
+    alarmSecondsLeft -= 1;
+    if (cd) cd.innerText = String(Math.max(0, alarmSecondsLeft));
+    if (alarmSecondsLeft <= 0) {
+      clearInterval(alarmCountdownTimer);
+      alarmCountdownTimer = null;
+      try { alarmModal.hide(); } catch(e) {}
+    }
+  }, 1000);
+
+  alarmModal.show();
+  setTimeout(() => inp?.focus(), 150);
+}
+
+function hideAlarmPinDialog() {
+  if (alarmCountdownTimer) {
+    clearInterval(alarmCountdownTimer);
+    alarmCountdownTimer = null;
+  }
+  try { alarmModal?.hide(); } catch(e) {}
+}
+
+async function submitAlarmPin() {
+  const inp = document.getElementById('alarmPinInput');
+  const err = document.getElementById('alarmPinError');
+  const pin = String(inp?.value || '').trim();
+
+  if (pin !== ALARM_PIN) {
+    if (err) { err.style.display='block'; err.innerText = 'Wrong PIN'; }
+    return;
+  }
+
+  hideAlarmPinDialog();
+  await sendCommand('pin_correct'); // web helper
 }
 
 /* -----------------------------
    Socket.IO wiring
 ------------------------------ */
+socket.on('event', payload => {
+  log(`Event ${payload.topic}: ${safeJsonStringify(payload.event)}`);
+
+  const ev = payload?.event;
+  if (!ev) return;
+
+  const kind = String(ev.kind || '').toLowerCase();
+  const typ = String(ev.type || '').toLowerCase();
+
+  if (kind === 'system' && typ === 'alarm_on') showAlarmPinDialog();
+  if (kind === 'system' && typ === 'alarm_off') hideAlarmPinDialog();
+});
+
 socket.on('connect', ()=> {
   setBadge('socketBadge', 'connected', 'success');
   log('Socket connected');
@@ -726,6 +764,7 @@ socket.on('disconnect', ()=> {
 socket.on('snapshot', snap => {
   LAST_SNAPSHOT = snap;
   lastSnapshotAt = Date.now();
+
   const connected = !!(snap && snap.mqtt_connected);
   if (lastMqttConnected === null) {
     log(`MQTT: ${connected ? 'connected' : 'disconnected'}`, connected ? 'info' : 'warn');
@@ -743,22 +782,8 @@ socket.on('snapshot', snap => {
   applySnapshotToUI(snap);
 });
 
-socket.on('event', payload => {
-  log(`Event ${payload.topic}: ${safeJsonStringify(payload.event)}`);
-});
-
-socket.on('event', payload => {
-  const ev = payload?.event;
-  if (!ev) return;
-
-  if (String(ev.kind).toLowerCase() === 'system' && String(ev.type).toLowerCase() === 'peoplecount') {
-    log(`PeopleCount = ${ev.value} (pi=${ev.pi})`);
-  }
-});
-
-
 /* -----------------------------
-   UI ticks
+   UI ticks + bindings
 ------------------------------ */
 setInterval(() => {
   const snapAgeEl = document.getElementById('snapAge');
@@ -767,10 +792,6 @@ setInterval(() => {
   const sec = Math.floor((Date.now() - lastSnapshotAt) / 1000);
   snapAgeEl.innerText = `${sec}s ago`;
 }, 1000);
-
-/* -----------------------------
-   Buttons binding
------------------------------- */
 
 document.getElementById('refreshDevicesBtn')?.addEventListener('click', fetchDevices);
 
@@ -796,7 +817,6 @@ document.getElementById('customCmd')?.addEventListener('keydown', (e) => {
   }
 });
 
-/* Views buttons */
 document.getElementById('viewWebcam')?.addEventListener('click', (ev) => {
   ev.preventDefault();
   setActiveListItem(ev.currentTarget);
@@ -809,6 +829,11 @@ document.getElementById('viewGrafana')?.addEventListener('click', (ev) => {
   showGrafana();
 });
 
+document.getElementById('alarmPinSubmitBtn')?.addEventListener('click', submitAlarmPin);
+document.getElementById('alarmPinInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitAlarmPin();
+});
+
 /* -----------------------------
    Init
 ------------------------------ */
@@ -818,5 +843,7 @@ document.getElementById('viewGrafana')?.addEventListener('click', (ev) => {
   await fetchDevices();
 })();
 </script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
