@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>IoT Smart Home Dashboard</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="row g-3">
+      <div class="col-12">
+        <h1 class="h4 page-title">IoT Smart Home — Dashboard</h1>
+      </div>
+
+      <!-- Sidebar -->
+      <div class="col-lg-3 sidebar">
+        <!-- Status -->
+        <div class="card mb-3">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between">
+              <h5 class="card-title mb-0">Status</h5>
+              <span id="mqttBadge" class="badge rounded-pill bg-secondary">MQTT: —</span>
+            </div>
+
+            <div class="mt-2 small text-muted">
+              <span>Socket: </span><span id="socketBadge" class="badge bg-secondary">—</span>
+              <span class="ms-2">Last snapshot: </span><span id="snapAge" class="text-muted">—</span>
+
+              <div class="mt-2 small text-muted">
+                Alarm:
+                <span id="alarmStateBadge" class="badge bg-secondary">—</span>
+                <span class="ms-2">Mode:</span>
+                <span id="armStateBadge" class="badge bg-secondary">—</span>
+              </div>
+
+              <div class="mt-2 small text-muted">
+                People (total): <span id="peopleCountTotal" class="badge bg-info">—</span>
+              </div>
+              <div class="mt-1 small text-muted">
+                PeopleCount PI1: <span id="peopleCountPi1" class="badge bg-secondary">—</span>
+                <span class="ms-2">PI2:</span> <span id="peopleCountPi2" class="badge bg-secondary">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Devices -->
+        <div class="card mb-3">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <h5 class="card-title mb-0">Devices</h5>
+              <button class="btn btn-sm btn-outline-light" id="refreshDevicesBtn" type="button">Refresh</button>
+            </div>
+            <div id="devicesList" class="list-group" aria-label="Devices list"></div>
+          </div>
+        </div>
+
+        <!-- Views (Grafana / Webcam) -->
+        <div class="card mb-3">
+          <div class="card-body p-2">
+            <h6 class="px-2 mb-2">Views</h6>
+            <div class="list-group">
+              <a href="#" class="list-group-item list-group-item-action" id="viewWebcam">Webcam</a>
+              <a href="#" class="list-group-item list-group-item-action" id="viewGrafana">Grafana</a>
+            </div>
+            <div class="px-2 mt-2 small text-muted">
+              Grafana/Webcam URLs se čitaju iz <code>/api/ui_config</code>.
+            </div>
+          </div>
+        </div>
+
+        <!-- Commands -->
+        <div class="card mt-3">
+          <div class="card-body">
+            <h6 class="mb-2">Quick commands (controller)</h6>
+
+            <div class="alert alert-warning py-2 small">
+              Po specifikaciji: ARM/DISARM ide preko DMS PIN-a (1234). Ovi tasteri su debug.
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 mb-2">
+              <button class="btn btn-sm btn-outline-light" data-cmd="help">help</button>
+              <button class="btn btn-sm btn-outline-light" data-cmd="status">status</button>
+              <button class="btn btn-sm btn-outline-success" data-cmd="arm">arm</button>
+              <button class="btn btn-sm btn-outline-warning" data-cmd="disarm">disarm</button>
+              <button class="btn btn-sm btn-outline-danger" data-cmd="alarm_on">alarm_on</button>
+              <button class="btn btn-sm btn-outline-secondary" data-cmd="alarm_off">alarm_off</button>
+              <button class="btn btn-sm btn-outline-info" data-cmd="people_reset">people_reset</button>
+              <button class="btn btn-sm btn-outline-warning" data-cmd="btn_press">BTN press (timer +N / stop blink)</button>
+            </div>
+
+            <div class="input-group input-group-sm">
+              <input id="customCmd" type="text" class="form-control" placeholder="custom command (e.g. lcd Hello)" />
+              <button class="btn btn-primary" id="sendCustomCmdBtn" type="button">Send</button>
+            </div>
+
+            <div class="mt-2 text-muted small">
+              Commands are published to MQTT and handled by <code>app.py</code> controller queue.
+            </div>
+          </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="card mt-3">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <h6 class="mb-0">Logs</h6>
+              <button class="btn btn-sm btn-outline-light" id="clearLogsBtn" type="button">Clear</button>
+            </div>
+            <div id="logs" aria-label="Logs"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main -->
+      <div class="col-lg-9">
+        <div id="mainArea">
+          <div class="alert alert-info">Select a device to see sensors &amp; actuators.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alarm PIN Modal -->
+  <div class="modal fade" id="alarmPinModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content bg-dark text-light">
+        <div class="modal-header">
+          <h5 class="modal-title">ALARM — Enter PIN</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            Alarm is active. Enter PIN to disarm.
+          </div>
+
+          <div class="input-group">
+            <input id="alarmPinInput" type="password" class="form-control" placeholder="PIN" autocomplete="off" />
+            <button class="btn btn-danger" id="alarmPinSubmitBtn" type="button">Submit</button>
+          </div>
+
+          <div class="mt-2 small text-muted">
+            Time left: <span id="alarmPinCountdown">—</span>s
+          </div>
+
+          <div class="mt-2 small text-danger" id="alarmPinError" style="display:none;"></div>
+
+          <div class="mt-3 small text-muted">
+            Tip: Po specifikaciji, ispravan PIN se unosi na DMS. Ovaj dialog je pomoć u web-u.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* -----------------------------
+   Helpers
+------------------------------ */
+function el(tag, cls='', txt='') {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (txt !== undefined && txt !== null && txt !== '') e.innerText = txt;
+  return e;
+}
+
+function safeJsonStringify(x) {
+  try { return JSON.stringify(x); } catch(e) { return String(x); }
+}
+
+function log(msg, level='info') {
+  const logsEl = document.getElementById('logs');
+  const at = new Date().toLocaleTimeString();
+  const row = document.createElement('div');
+  row.innerText = `[${at}] ${msg}`;
+  if (level === 'error') row.style.color = 'rgba(255,120,120,0.9)';
+  if (level === 'warn') row.style.color = 'rgba(255,210,120,0.9)';
+  if (logsEl) logsEl.prepend(row);
+  else console.log(row.innerText);
+}
+
+function setBadge(elId, text, tone='secondary') {
+  const b = document.getElementById(elId);
+  if (!b) return;
+  b.className = `badge ${b.classList.contains('rounded-pill') ? 'rounded-pill ' : ''}bg-${tone}`;
+  b.innerText = text;
+}
+
+function setActiveListItem(element) {
+  document.querySelectorAll('.sidebar .list-group-item').forEach(x => x.classList.remove('active'));
+  element?.classList.add('active');
+}
+
+/* -----------------------------
+   UI config (Grafana/Webcam)
+------------------------------ */
+let UI_CONFIG = { grafana_url: 'http://localhost:3000/dashboard/snapshot/F3kWIRF51DT0FZICxrhCW6kVdka1GiP5', webcam_url: 'http://192.168.107.141:8080/?action=stream' };
+console.log("Podešeni URL kamere je:", UI_CONFIG.webcam_url);
+
+async function fetchUiConfig() {
+  try {
+    const res = await fetch('/api/ui_config', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Failed to fetch ui_config');
+    UI_CONFIG = await res.json();
+  } catch (e) {
+    log('ui_config error: ' + e.message, 'warn');
+  }
+}
+
+/* -----------------------------
+   Views
+------------------------------ */
+function showWebcam() {
+  const main = document.getElementById('mainArea');
+  const url = String("http://192.168.107.141:8080/?action=stream").trim();
+
+  // HTML za samu kameru sa tvojim stilovima (object-fit: cover, crna pozadina)
+  const cameraHtml = url
+    ? `<img src="${url}" 
+            style="width: 100%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); object-fit: cover;" 
+            alt="Webcam Stream"
+            onerror="this.src='https://via.placeholder.com/640x480?text=No+Camera+Signal'">`
+    : `<div class="text-muted">WEBCAM_URL nije podešen.</div>`;
+
+  main.innerHTML = `
+    <div class="card bg-dark text-white">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h3 class="h5 mb-0">Live Camera Feed</h3>
+            <span class="badge bg-danger animate-pulse">● LIVE</span>
+        </div>
+        <div class="text-center bg-black rounded p-2" 
+             style="min-height: 420px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+          ${cameraHtml}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function showGrafana() {
+  const main = document.getElementById('mainArea');
+  const url = String(UI_CONFIG.grafana_url || 'http://localhost:3000').trim();
+
+  main.innerHTML = `
+    <div class="card" style="height: 85vh;">
+      <div class="card-body p-0">
+        <iframe src="${url}"
+                width="100%" height="100%"
+                frameborder="0"
+                style="border-radius: 8px;">
+        </iframe>
+      </div>
+    </div>
+  `;
+}
+
+/* -----------------------------
+   API: commands
+------------------------------ */
+async function sendCommand(cmd) {
+  cmd = String(cmd || '').trim();
+  if (!cmd) return;
+
+  try {
+    const res = await fetch('/api/commands', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ cmd, deviceId: selectedDeviceId })
+    });
+    const json = await res.json().catch(()=>null);
+
+    if (!res.ok || !json || !json.ok) {
+      log(`Command failed: ${res.status} ${safeJsonStringify(json)}`, 'error');
+      return;
+    }
+    log(`Command sent (${selectedDeviceId || 'PI1'}): ${cmd}`);
+  } catch (e) {
+    log(`Command error: ${e.message}`, 'error');
+  }
+}
+
+/* -----------------------------
+   State
+------------------------------ */
+const sensorHist = {};
+const charts = {};
+const socket = io();
+
+let LAST_SNAPSHOT = null;
+let lastMqttConnected = null;
+let lastSnapshotAt = null;
+let selectedDeviceId = null;
+
+// alarm modal state
+let alarmModal = null;
+let alarmCountdownTimer = null;
+let alarmSecondsLeft = 0;
+const ALARM_PIN = '1234';
+const ALARM_PIN_TTL = 10;
+
+/* -----------------------------
+   Devices list
+------------------------------ */
+async function fetchDevices() {
+  try {
+    const res = await fetch('/api/devices', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Failed to fetch devices');
+    const devices = await res.json();
+    renderDevices(devices);
+  } catch (err) {
+    log('Error fetching devices: ' + err.message, 'error');
+    console.error(err);
+  }
+}
+
+function renderDevices(devices) {
+  const list = document.getElementById('devicesList');
+  list.innerHTML = '';
+
+  devices.forEach(d => {
+    const a = el('a', 'list-group-item list-group-item-action device-card');
+    a.href = '#';
+    a.dataset.deviceId = d.id;
+
+    const piNum = String(d.pi || '').trim();
+    const piCls = piNum === '1' ? 'pi1' : (piNum === '2' ? 'pi2' : (piNum === '3' ? 'pi3' : '') );
+    if (piCls) a.classList.add(piCls);
+
+    a.innerHTML = `
+      <div class="d-flex w-100 justify-content-between align-items-center">
+        <h6 class="mb-1">${d.name}</h6>
+        <small class="text-muted">PI: ${d.pi}</small>
+      </div>
+      <p class="mb-1"><small>${d.description || ''}</small></p>
+    `;
+
+    a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      setActiveListItem(a);
+      selectDevice(d.id);
+    });
+
+    list.appendChild(a);
+  });
+
+  if (!selectedDeviceId && devices.length > 0) {
+    const first = devices[0];
+    const firstEl = list.querySelector('[data-device-id]');
+    if (firstEl) firstEl.classList.add('active');
+    selectDevice(first.id);
+  }
+}
+
+async function selectDevice(deviceId) {
+  selectedDeviceId = deviceId;
+
+  const main = document.getElementById('mainArea');
+  main.innerHTML = `
+    <div class="d-flex align-items-center gap-2">
+      <div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div>
+      <div>Loading device…</div>
+    </div>
+  `;
+
+  try {
+    const res = await fetch(`/api/devices/${deviceId}/details`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Device details fetch failed');
+    const data = await res.json();
+    renderDeviceDetails(data);
+
+    applySnapshotToUI(LAST_SNAPSHOT);
+  } catch (err) {
+    main.innerHTML = `<div class="alert alert-danger">Failed to load device: ${err.message}</div>`;
+    console.error(err);
+  }
+}
+
+/* -----------------------------
+   Charts helpers
+------------------------------ */
+function getYBoundsFromData(values) {
+  if (!values || values.length === 0) return { min: 0, max: 100 };
+  const nums = values.map(v => Number(v)).filter(v => Number.isFinite(v));
+  if (nums.length === 0) return { min: 0, max: 100 };
+  let min = Math.min(...nums), max = Math.max(...nums);
+  if (max <= 1 && min >= 0) return { min: 0, max: 1 };
+  const span = Math.max(max - min, 1);
+  const pad = span * 0.2;
+  min = min - pad; max = max + pad;
+  return { min: Math.floor(min), max: Math.ceil(max) };
+}
+
+function renderSparkline(code) {
+  const canvas = document.getElementById(`chart-${code}`);
+  if (!canvas) return;
+
+  const dataVals = (sensorHist[code] || []).slice(-25).map(p => p.value);
+  const bounds = getYBoundsFromData(dataVals);
+
+  if (charts[code]) {
+    try { charts[code].destroy(); } catch(e) {}
+  }
+
+  charts[code] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: dataVals.map((_,i)=>i),
+      datasets: [{
+        data: dataVals,
+        borderColor: '#00d2ff',
+        borderWidth: 1,
+        pointRadius: 0,
+        tension: 0.35
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display:false },
+        y: {
+          display:true,
+          min: bounds.min,
+          max: bounds.max,
+          ticks: { maxTicksLimit:3, color:'rgba(255,255,255,0.6)' },
+          grid: { color: 'rgba(255,255,255,0.06)' }
+        }
+      },
+      plugins: { legend:{ display:false }, tooltip:{ enabled:false } }
+    }
+  });
+}
+
+function pushNumeric(code, value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return;
+
+  sensorHist[code] = sensorHist[code] || [];
+  sensorHist[code].push({ ts: Date.now(), value: num });
+  if (sensorHist[code].length > 200) sensorHist[code].shift();
+
+  const chart = charts[code];
+  if (!chart) return;
+
+  const lastN = sensorHist[code].slice(-25).map(p => p.value);
+  chart.data.labels = lastN.map((_,i)=>i);
+  chart.data.datasets[0].data = lastN;
+  const bounds = getYBoundsFromData(lastN);
+  chart.options.scales.y.min = bounds.min;
+  chart.options.scales.y.max = bounds.max;
+  chart.update('none');
+}
+
+function updateSensorValueUI(code, value, simulated=false) {
+  const vEl = document.getElementById(`value-${code}`);
+  if (!vEl) return;
+
+  let display = value;
+  if (value && typeof value === 'object') {
+    const parts = [];
+    if (value.temperature !== undefined) parts.push(`${value.temperature}°C`);
+    if (value.humidity !== undefined) parts.push(`${value.humidity}%`);
+    display = parts.join(' / ') || safeJsonStringify(value);
+  } else if (Number.isFinite(Number(value))) {
+    display = String(Number(value));
+  } else {
+    display = String(value);
+  }
+
+  vEl.innerText = display + (simulated ? ' (sim)' : '');
+  pushNumeric(code, value);
+}
+
+/* -----------------------------
+   Render details
+------------------------------ */
+function renderDeviceDetails(data) {
+  const main = document.getElementById('mainArea');
+  main.innerHTML = '';
+
+  const header = el('div', 'd-flex mb-3 align-items-center flex-wrap gap-2');
+  header.appendChild(el('h3','me-2', `${data.name} (PI${data.pi})`));
+  header.appendChild(el('small','text-muted', data.description || ''));
+  main.appendChild(header);
+
+  main.appendChild(el('h5','mt-2','Sensors'));
+  const sensorsRow = el('div','row g-3');
+
+  (data.sensors || []).forEach(s => {
+    const col = el('div','col-md-4');
+    const card = el('div','card device-card p-2');
+    const body = el('div','card-body p-2');
+
+    body.appendChild(el('h6','card-title mb-1', `${s.name} (${s.code})`));
+
+    const meta = el('div','mb-1 sensor-meta');
+    meta.appendChild(el('span','badge bg-secondary sensor-tag', s.type || 'sensor'));
+    if (s.simulated) meta.appendChild(el('span','badge bg-warning ms-1 sensor-tag','simulated'));
+    body.appendChild(meta);
+
+    const valueEl = el('div','fs-4 fw-bold mb-1','—');
+    valueEl.id = `value-${s.code}`;
+    body.appendChild(valueEl);
+
+    if (String(s.code || '').toUpperCase().startsWith('DHT')) {
+      const th = el('div','small text-muted');
+      th.innerHTML = `<span class="me-2">T:</span><span id="dht-t-${s.code}">—</span>
+                      <span class="ms-3 me-2">H:</span><span id="dht-h-${s.code}">—</span>`;
+      body.appendChild(th);
+    }
+
+    const canvas = el('canvas','sparkline');
+    canvas.id = `chart-${s.code}`;
+    body.appendChild(canvas);
+
+    card.appendChild(body);
+    col.appendChild(card);
+    sensorsRow.appendChild(col);
+
+    sensorHist[s.code] = sensorHist[s.code] || [];
+    renderSparkline(s.code);
+  });
+
+  main.appendChild(sensorsRow);
+
+  main.appendChild(el('h5','mt-4','Actuators'));
+  const actuatorsRow = el('div','row g-3 mt-1');
+
+  (data.actuators || []).forEach(a => {
+    const col = el('div','col-md-4');
+    const card = el('div','card p-2');
+    const body = el('div','card-body p-2');
+
+    body.appendChild(el('h6','card-title mb-2', `${a.name} (${a.code})`));
+
+    const stateEl = el('div','mb-2');
+    stateEl.innerHTML = `State: <span class="fw-bold" id="actstate-${a.code}">—</span>`;
+    body.appendChild(stateEl);
+
+    const controls = el('div','d-flex gap-2 flex-wrap');
+
+    if (a.code === 'DL') {
+      const onBtn = el('button','btn btn-sm btn-success','ON');
+      const offBtn = el('button','btn btn-sm btn-danger','OFF');
+      const beepBtn = el('button','btn btn-sm btn-outline-light','BEEP(1.5s)');
+      onBtn.onclick = () => sendCommand('dl_on');
+      offBtn.onclick = () => sendCommand('dl_off');
+      beepBtn.onclick = () => sendCommand('dl_beep');
+      controls.appendChild(onBtn); controls.appendChild(offBtn); controls.appendChild(beepBtn);
+
+    } else if (a.code === 'DB') {
+      const onBtn = el('button','btn btn-sm btn-success','ON');
+      const offBtn = el('button','btn btn-sm btn-danger','OFF');
+      const beepBtn = el('button','btn btn-sm btn-outline-light','BEEP(1.5s)');
+      onBtn.onclick = () => sendCommand('b');
+      offBtn.onclick = () => sendCommand('boff');
+      beepBtn.onclick = () => sendCommand('beep');
+      controls.appendChild(onBtn); controls.appendChild(offBtn); controls.appendChild(beepBtn);
+
+    } else if (a.code === 'BRGB') {
+      const presets = ['red','green','blue','white','off'];
+      presets.forEach(c => {
+        const btn = el('button','btn btn-sm btn-outline-info', c);
+        btn.onclick = () => sendCommand(`brgb_${c}`);
+        controls.appendChild(btn);
+      });
+      const cycleBtn = el('button','btn btn-sm btn-outline-warning','cycle');
+      cycleBtn.onclick = () => sendCommand('brgb_cycle');
+      controls.appendChild(cycleBtn);
+
+    } else if (a.code === 'LCD') {
+      const inp = el('input','form-control form-control-sm');
+      inp.placeholder = 'text';
+      inp.style.maxWidth = '220px';
+      const btn = el('button','btn btn-sm btn-primary','Send');
+      btn.onclick = ()=> sendCommand('lcd ' + (inp.value || ''));
+      controls.appendChild(inp); controls.appendChild(btn);
+
+    } else {
+      const statusBtn = el('button','btn btn-sm btn-outline-light','status');
+      statusBtn.onclick = () => sendCommand('status');
+      controls.appendChild(statusBtn);
+    }
+
+    body.appendChild(controls);
+    card.appendChild(body);
+    col.appendChild(card);
+    actuatorsRow.appendChild(col);
+  });
+
+  main.appendChild(actuatorsRow);
+}
+
+/* -----------------------------
+   Snapshot -> UI
+------------------------------ */
+function applySnapshotToUI(snap) {
+  if (!snap || !Array.isArray(snap.items)) return;
+
+  // alarm badge (tačke 4/5/6)
+  const alarmActive = !!snap.alarm_active;
+  setBadge('alarmStateBadge', alarmActive ? 'ALARM ON' : 'ALARM OFF', alarmActive ? 'danger' : 'secondary');
+
+  // arm state inference (arming_started / armed / disarmed)
+  let lastState = null; // 'ARMING' | 'ARMED' | 'DISARMED'
+  let lastStateTs = 0;
+
+  // people count refresh flags
+  let pi1 = { ts: 0, value: null };
+  let pi2 = { ts: 0, value: null };
+  
+  // update actuators/sensors + scan system events
+  snap.items.forEach(it => {
+    const device = String(it.device || '').toUpperCase();
+    const kind = String(it.kind || '').toLowerCase();
+    const typ = String(it.type || '').toLowerCase();
+    const pi = String(it.pi || it.pi_id || '').replace(/^pi/i,'');
+    const ts = Number(it.timestamp || 0);
+
+    if (kind === 'system' && device === 'SYSTEM') {
+      const val = Number(it.value);
+      if (typ === 'arming_started' && ts >= lastStateTs) { lastState = 'ARMING'; lastStateTs = ts; }
+      if (typ === 'armed' && ts >= lastStateTs) { lastState = 'ARMED'; lastStateTs = ts; }
+      if (typ === 'disarmed' && ts >= lastStateTs) { lastState = 'DISARMED'; lastStateTs = ts; }
+      if (!Number.isFinite(val)) return;
+      if (pi === '1' && ts >= pi1.ts) pi1 = { ts, value: val };
+      if (pi === '2' && ts >= pi2.ts) pi2 = { ts, value: val };
+    }
+
+    if (kind === 'actuator') {
+      const st = document.getElementById(`actstate-${device}`);
+      if (st) {
+        if ((device === 'DL' || device === 'DB') && (it.value === 0 || it.value === 1 || it.value === false || it.value === true)) {
+          const on = (it.value === 1 || it.value === true);
+          st.innerText = on ? 'ON' : 'OFF';
+        } else {
+          st.innerText = String(it.value);
+        }
+      }
+    }
+
+    if (kind === 'sensor') {
+      if (device.startsWith('DHT') && (typ === 'temperature' || typ === 'humidity')) {
+        const tEl = document.getElementById(`dht-t-${device}`);
+        const hEl = document.getElementById(`dht-h-${device}`);
+
+        if (typ === 'temperature' && tEl) tEl.innerText = `${it.value}°C`;
+        if (typ === 'humidity' && hEl) hEl.innerText = `${it.value}%`;
+
+        const big = document.getElementById(`value-${device}`);
+        if (big) {
+          const t = tEl ? tEl.innerText : '';
+          const h = hEl ? hEl.innerText : '';
+          const parts = [];
+          if (t && t !== '—') parts.push(t);
+          if (h && h !== '—') parts.push(h);
+          big.innerText = parts.join(' / ') || '—';
+        }
+
+        if (typ === 'temperature') pushNumeric(device, it.value);
+      } else {
+        updateSensorValueUI(device, it.value, it.simulated);
+      }
+    }
+  });
+
+  // set arm badge
+  if (alarmActive) {
+    setBadge('armStateBadge', 'ALARM', 'danger');
+  } else if (lastState === 'ARMED') {
+    setBadge('armStateBadge', 'ARMED', 'success');
+  } else if (lastState === 'ARMING') {
+    setBadge('armStateBadge', 'ARMING', 'warning');
+  } else {
+    setBadge('armStateBadge', 'DISARMED', 'secondary');
+  }
+
+  const pi1Text = (pi1.value === null) ? '—' : String(pi1.value);
+  const pi2Text = (pi2.value === null) ? '—' : String(pi2.value);
+  const totalText = (pi1.value === null || pi2.value === null) ? '—' : String(pi1.value + pi2.value);
+
+  setBadge('peopleCountPi1', pi1Text, (pi1.value === null) ? 'dark' : 'secondary');
+  setBadge('peopleCountPi2', pi2Text, (pi2.value === null) ? 'dark' : 'secondary');
+  setBadge('peopleCountTotal', totalText, 'info');
+
+}
+
+/* -----------------------------
+   Alarm modal
+------------------------------ */
+function showAlarmPinDialog() {
+  const modalEl = document.getElementById('alarmPinModal');
+  if (!modalEl) return;
+
+  if (!alarmModal) alarmModal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+
+  const inp = document.getElementById('alarmPinInput');
+  const err = document.getElementById('alarmPinError');
+  if (inp) inp.value = '';
+  if (err) { err.style.display='none'; err.innerText=''; }
+
+  alarmSecondsLeft = ALARM_PIN_TTL;
+  const cd = document.getElementById('alarmPinCountdown');
+  if (cd) cd.innerText = String(alarmSecondsLeft);
+
+  if (alarmCountdownTimer) clearInterval(alarmCountdownTimer);
+  alarmCountdownTimer = setInterval(() => {
+    alarmSecondsLeft -= 1;
+    if (cd) cd.innerText = String(Math.max(0, alarmSecondsLeft));
+    if (alarmSecondsLeft <= 0) {
+      clearInterval(alarmCountdownTimer);
+      alarmCountdownTimer = null;
+      try { alarmModal.hide(); } catch(e) {}
+    }
+  }, 1000);
+
+  alarmModal.show();
+  setTimeout(() => inp?.focus(), 150);
+}
+
+function hideAlarmPinDialog() {
+  if (alarmCountdownTimer) {
+    clearInterval(alarmCountdownTimer);
+    alarmCountdownTimer = null;
+  }
+  try { alarmModal?.hide(); } catch(e) {}
+}
+
+async function submitAlarmPin() {
+  const inp = document.getElementById('alarmPinInput');
+  const err = document.getElementById('alarmPinError');
+  const pin = String(inp?.value || '').trim();
+
+  if (pin !== ALARM_PIN) {
+    if (err) { err.style.display='block'; err.innerText = 'Wrong PIN'; }
+    return;
+  }
+
+  hideAlarmPinDialog();
+  await sendCommand('pin_correct'); // web helper
+}
+
+/* -----------------------------
+   Socket.IO wiring
+------------------------------ */
+socket.on('event', payload => {
+  log(`Event ${payload.topic}: ${safeJsonStringify(payload.event)}`);
+
+  const ev = payload?.event;
+  if (!ev) return;
+
+  const kind = String(ev.kind || '').toLowerCase();
+  const typ = String(ev.type || '').toLowerCase();
+
+  if (kind === 'system' && typ === 'alarm_on') showAlarmPinDialog();
+  if (kind === 'system' && typ === 'alarm_off') hideAlarmPinDialog();
+});
+
+socket.on('connect', ()=> {
+  setBadge('socketBadge', 'connected', 'success');
+  log('Socket connected');
+});
+
+socket.on('disconnect', ()=> {
+  setBadge('socketBadge', 'disconnected', 'secondary');
+  log('Socket disconnected', 'warn');
+});
+
+socket.on('snapshot', snap => {
+  LAST_SNAPSHOT = snap;
+  lastSnapshotAt = Date.now();
+
+  const connected = !!(snap && snap.mqtt_connected);
+  if (lastMqttConnected === null) {
+    log(`MQTT: ${connected ? 'connected' : 'disconnected'}`, connected ? 'info' : 'warn');
+  } else if (connected !== lastMqttConnected) {
+    log(`MQTT: ${connected ? 'connected' : 'disconnected'}`, connected ? 'info' : 'warn');
+  }
+  lastMqttConnected = connected;
+
+  const badge = document.getElementById('mqttBadge');
+  if (badge) {
+    badge.className = 'badge rounded-pill ' + (connected ? 'bg-success' : 'bg-secondary');
+    badge.innerText = `MQTT: ${connected ? 'connected' : 'disconnected'}`;
+  }
+
+  applySnapshotToUI(snap);
+});
+
+/* -----------------------------
+   UI ticks + bindings
+------------------------------ */
+setInterval(() => {
+  const snapAgeEl = document.getElementById('snapAge');
+  if (!snapAgeEl) return;
+  if (!lastSnapshotAt) { snapAgeEl.innerText = '—'; return; }
+  const sec = Math.floor((Date.now() - lastSnapshotAt) / 1000);
+  snapAgeEl.innerText = `${sec}s ago`;
+}, 1000);
+
+document.getElementById('refreshDevicesBtn')?.addEventListener('click', fetchDevices);
+
+document.getElementById('clearLogsBtn')?.addEventListener('click', () => {
+  const logsEl = document.getElementById('logs');
+  if (logsEl) logsEl.innerHTML = '';
+});
+
+document.querySelectorAll('[data-cmd]').forEach(btn => {
+  btn.addEventListener('click', () => sendCommand(btn.getAttribute('data-cmd')));
+});
+
+document.getElementById('sendCustomCmdBtn')?.addEventListener('click', () => {
+  const inp = document.getElementById('customCmd');
+  sendCommand(inp?.value || '');
+  if (inp) inp.value = '';
+});
+
+document.getElementById('customCmd')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    sendCommand(e.target.value || '');
+    e.target.value = '';
+  }
+});
+
+document.getElementById('viewWebcam')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  setActiveListItem(ev.currentTarget);
+  showWebcam();
+});
+
+document.getElementById('viewGrafana')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  setActiveListItem(ev.currentTarget);
+  showGrafana();
+});
+
+document.getElementById('alarmPinSubmitBtn')?.addEventListener('click', submitAlarmPin);
+document.getElementById('alarmPinInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitAlarmPin();
+});
+
+/* -----------------------------
+   Init
+------------------------------ */
+(async function init() {
+  setBadge('socketBadge', 'connecting…', 'secondary');
+  await fetchUiConfig();
+  await fetchDevices();
+})();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

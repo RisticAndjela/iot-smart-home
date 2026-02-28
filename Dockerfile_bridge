@@ -1,0 +1,6 @@
+FROM python:3.9-slim
+WORKDIR /app
+# Instaliraj biblioteke koje server.py koristi
+RUN pip install paho-mqtt influxdb-client
+COPY . .
+CMD ["python", "server.py"]
