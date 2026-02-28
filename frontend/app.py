@@ -81,18 +81,18 @@ if os.path.exists(SETTINGS_PATH):
     with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
         raw_settings = json.load(f)
 
-MQTT_HOST = os.getenv("MQTT_HOST", os.getenv("MQTT_BROKER", "localhost"))
+MQTT_HOST = os.getenv("MQTT_HOST", os.getenv("MQTT_BROKER", "192.168.107.170"))
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 
 # Influx config (opciono)
-INFLUX_URL = os.getenv("INFLUX_URL", "http://localhost:8086")
+INFLUX_URL = os.getenv("INFLUX_URL", "http://192.168.107.170:8086")
 INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "iot-super-token")
 INFLUX_ORG = os.getenv("INFLUX_ORG", "FTN")
 INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "iot-sensor-report")
 ENABLE_INFLUX = os.getenv("ENABLE_INFLUX", "1").strip().lower() in ("1", "true", "yes", "on")
 
 # UI views (Grafana + webcam)
-GRAFANA_URL = os.getenv("GRAFANA_URL", "http://localhost:3000")
+GRAFANA_URL = os.getenv("GRAFANA_URL", "http://192.168.107.170:3000")
 WEBCAM_URL = os.getenv("WEBCAM_URL", "")  # npr: http://localhost:8081/stream ili http://pi3:8081/stream
 
 mqtt_client = mqtt.Client(

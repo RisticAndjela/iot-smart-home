@@ -112,7 +112,7 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
     # Local derived "simulated" flags for clean tagging in events
     light_sim = bool(getattr(light, "simulated", True)) if light else True
     buzzer_sim = bool(getattr(buzzer, "simulated", True)) if buzzer else True
-    rgb_sim = bool(getattr(rgb, "simulated", True)) if rgb else True
+    rgb_sim = bool(getattr(rgb, "simulated", False)) if rgb else False
 
     # Timers for simulated auto-off (1.5s)
     buzzer_timer: Optional[threading.Timer] = None
@@ -197,10 +197,15 @@ def run_controller(light: Optional[DoorLight], buzzer: Optional[DoorBuzzer], rgb
             _light_on_emit()
 
     def _set_rgb(color: str):
+        nonlocal rgb_cycle_enabled  # OVO JE KLJUČNO
         if not rgb:
             print("[CONTROLLER] RGB not initialized.")
             return
-        c = (color or "").strip().upper()
+        
+        # Čim stigne komanda za boju, gasimo automatski ciklus
+        rgb_cycle_enabled = False 
+        
+        c = (color or "").strip().upper() 
         try:
             rgb.set_color_name(c)
             send_actuator_message(device="BRGB", value=c, type_name="rgb", pi_id="3", simulated=rgb_sim)

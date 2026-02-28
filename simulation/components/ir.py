@@ -10,17 +10,17 @@ def run_ir(settings, threads, stop_event):
     device_name = settings["device"]
     pi_id = settings["pi"]
     simulated = settings.get("simulated", True)
-    pin = settings.get("pin", 17)
+    pin = settings.get("pin", 6)
 
     remote_map = {
-        "0x300ff6897": "brgb_red",
-        "0xff6897": "brgb_red",
-        "0x300ff9867": "brgb_green",
-        "0xff9867": "brgb_green",
-        "0x300ffb04f": "brgb_blue",
-        "0xffb04f": "brgb_blue",
-        "0x300ff4ab5": "brgb_off",
-        "0xff4ab5": "brgb_off",
+        "0x300f6897": "brgb_red",
+        "0xf6897": "brgb_red",
+        "0x300f9867": "brgb_green",
+        "0xf9867": "brgb_green",
+        "0x300fb04f": "brgb_blue",
+        "0xfb04f": "brgb_blue",
+        "0x300f4ab5": "brgb_off",
+        "0xf4ab5": "brgb_off",
     }
 
     def process_ir(code):

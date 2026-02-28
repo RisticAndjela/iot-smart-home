@@ -1,7 +1,8 @@
 from influxdb_client import Point
+from typing import Optional
 
 
-def write_event_to_influx(write_api, bucket, event, *, kind: str | None = None):
+def write_event_to_influx(write_api, bucket, event, *, kind: Optional[str] = None):
     """
     writes a single event to InfluxDB, primarily grouped *by device*, with a PI prefix:
         measurement = "PI{id}_{DEVICE}"

@@ -200,7 +200,8 @@ function setActiveListItem(element) {
 /* -----------------------------
    UI config (Grafana/Webcam)
 ------------------------------ */
-let UI_CONFIG = { grafana_url: 'http://localhost:3000', webcam_url: 'http://<ip-kamere>:8081/stream' };
+let UI_CONFIG = { grafana_url: 'http://localhost:3000/dashboard/snapshot/F3kWIRF51DT0FZICxrhCW6kVdka1GiP5', webcam_url: 'http://192.168.107.141:8080/?action=stream' };
+console.log("Podešeni URL kamere je:", UI_CONFIG.webcam_url);
 
 async function fetchUiConfig() {
   try {
@@ -217,20 +218,26 @@ async function fetchUiConfig() {
 ------------------------------ */
 function showWebcam() {
   const main = document.getElementById('mainArea');
-  const url = String(UI_CONFIG.webcam_url || '').trim();
+  const url = String("http://192.168.107.141:8080/?action=stream").trim();
 
-  const body = url
-    ? `<img src="${url}" class="img-fluid rounded" alt="Webcam Stream"
+  // HTML za samu kameru sa tvojim stilovima (object-fit: cover, crna pozadina)
+  const cameraHtml = url
+    ? `<img src="${url}" 
+            style="width: 100%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); object-fit: cover;" 
+            alt="Webcam Stream"
             onerror="this.src='https://via.placeholder.com/640x480?text=No+Camera+Signal'">`
-    : `<div class="text-muted">WEBCAM_URL nije podešen. Postavi env var <code>WEBCAM_URL</code>.</div>`;
+    : `<div class="text-muted">WEBCAM_URL nije podešen.</div>`;
 
   main.innerHTML = `
-    <div class="card">
+    <div class="card bg-dark text-white">
       <div class="card-body">
-        <h3 class="h5">Webcam</h3>
-        <div class="text-center bg-black rounded p-3"
-             style="min-height: 420px; display:flex; align-items:center; justify-content:center;">
-          ${body}
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h3 class="h5 mb-0">Live Camera Feed</h3>
+            <span class="badge bg-danger animate-pulse">● LIVE</span>
+        </div>
+        <div class="text-center bg-black rounded p-2" 
+             style="min-height: 420px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+          ${cameraHtml}
         </div>
       </div>
     </div>
