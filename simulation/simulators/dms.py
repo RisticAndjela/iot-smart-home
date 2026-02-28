@@ -1,17 +1,21 @@
 import time
-import random
 
-def generate_pin_sequence():
-    pin = ['1', '2', '3', '4']
-    while True:
-        for digit in pin:
-            yield digit
-        time.sleep(20) # Pauza između dva unosa PIN-a
 
 def run_dms_simulator(delay, callback, stop_event):
-    for digit in generate_pin_sequence():
-        # Simuliramo brzinu kucanja čoveka (npr. 0.5s između cifara)
-        time.sleep(0.5) 
-        callback(digit)
-        if stop_event.is_set():
-            break
+    """
+    Simulates a user entering 1234, with a pause between sequences.
+    """
+    pin = ["1", "2", "3", "4"]
+
+    while not stop_event.is_set():
+        for digit in pin:
+            if stop_event.is_set():
+                break
+            time.sleep(delay)   # speed of typing
+            callback(digit)
+
+        # pause between PIN entries, but keep it interruptible
+        for _ in range(40):     # 40 * 0.5s = 20s
+            if stop_event.is_set():
+                break
+            time.sleep(0.5)

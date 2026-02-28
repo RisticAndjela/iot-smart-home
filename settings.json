@@ -23,7 +23,7 @@
       "GSG": {  "device": "GSG", "pi": "2", "type": "gyro", "simulated": true, "mqtt_topic": "sensors/pi2/gsg", "pin": 1 }
     },
     "actuators": {
-      "4SD": { "device": "4SD", "pi": "2", "type": "display", "simulated": false, "mqtt_topic": "actuators/pi2/4sd", "pins": { "clk": 18, "dio": 19 } }
+      "4SD": { "device": "4SD", "pi": "2", "type": "display", "simulated": true, "mqtt_topic": "actuators/pi2/4sd", "pins": { "clk": 18, "dio": 19 } }
     }
   },
   "PI3": {
